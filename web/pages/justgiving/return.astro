@@ -1,0 +1,70 @@
+---
+import DiscordIcon from '../../components/DiscordIcon.astro';
+import Layout from '../../layouts/Layout.astro';
+
+const view = await Astro.locals.web.handleReturn({
+  t: Astro.url.searchParams.get('t') ?? undefined,
+  donationId: Astro.url.searchParams.get('donationId') ?? undefined,
+});
+Astro.response.status = view.status;
+
+const site = Astro.locals.web.getSite();
+const label = { success: 'Donation confirmed', retry: 'Still working on it', error: "Couldn't add your role" }[view.tone];
+---
+
+<Layout title={`${view.title} · ${site.communityName}`} noindex showInvite={false}>
+  <section class={`card status ${view.tone}`}>
+    <p class="label">{label}</p>
+    <h1 class="display">{view.title}</h1>
+    {view.paragraphs.map((text) => <p class="muted">{text}</p>)}
+    <div class="actions">
+      {view.retryUrl && <a class="button" href={view.retryUrl}>Try again</a>}
+      {
+        view.inviteUrl && (
+          <a class={view.retryUrl ? 'button secondary' : 'button'} href={view.inviteUrl}>
+            <DiscordIcon />
+            Back to Discord
+          </a>
+        )
+      }
+    </div>
+    {view.tone === 'success' && <p class="wall"><a href="/">See the donor wall</a></p>}
+  </section>
+</Layout>
+
+<style>
+  .status {
+    max-width: 520px;
+    margin: 6vh 0 0;
+  }
+  .status.retry {
+    border-left-color: var(--amber);
+  }
+  .label {
+    margin: 0 0 10px;
+    font-size: 0.875rem;
+    font-weight: 700;
+    color: var(--red);
+  }
+  .status.retry .label {
+    color: var(--amber);
+  }
+  .status.success .label {
+    color: var(--green);
+  }
+  h1 {
+    margin: 0 0 14px;
+    font-size: clamp(1.75rem, 6vw, 2.25rem);
+    line-height: 1.05;
+  }
+  p {
+    margin: 0 0 10px;
+  }
+  .actions {
+    margin-top: 20px;
+  }
+  .wall {
+    margin: 18px 0 0;
+    font-size: 0.9375rem;
+  }
+</style>

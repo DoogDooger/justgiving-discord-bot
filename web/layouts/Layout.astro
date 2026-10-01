@@ -1,0 +1,74 @@
+---
+import DiscordIcon from '../components/DiscordIcon.astro';
+import '../styles/global.css';
+import '../styles/seasonal.css';
+
+interface Props {
+  title: string;
+  description?: string;
+  /** Reload the page every N seconds (the home page uses this to stay live without JavaScript). */
+  refreshSeconds?: number;
+  noindex?: boolean;
+  /** Show the "Join" button in the header. */
+  showInvite?: boolean;
+}
+
+const site = Astro.locals.web.getSite();
+const {
+  title,
+  description = `Donate to ${site.communityName}'s ${site.charityName} charity drive and get a Discord role as a thank you.`,
+  refreshSeconds,
+  noindex = false,
+  showInvite = true,
+} = Astro.props;
+
+const pageUrl = `${site.baseUrl}${Astro.url.pathname}`;
+---
+
+<!doctype html>
+<html lang={site.locale} style={`--accent: ${site.accentColor}; --on-accent: ${site.onAccentColor}`}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+    {noindex && <meta name="robots" content="noindex" />}
+    {refreshSeconds && <meta http-equiv="refresh" content={String(refreshSeconds)} />}
+    <meta name="theme-color" content="#0b0b0d" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content={pageUrl} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    {
+      site.previewImageUrl && (
+        <>
+          <meta property="og:image" content={site.previewImageUrl} />
+          <meta name="twitter:card" content="summary_large_image" />
+        </>
+      )
+    }
+    <link rel="canonical" href={pageUrl} />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>{title}</title>
+  </head>
+  <body class:list={{ festive: site.festive }}>
+    <div class="snow" aria-hidden="true"></div>
+    <div class="page">
+      <header class="site-header">
+        <a class="brand" href={site.communityUrl ?? '/'}>
+          {site.logoPath ? <img src={site.logoPath} alt={site.communityName} /> : site.communityName}
+        </a>
+        {
+          showInvite && site.inviteUrl && (
+            <a class="button" href={site.inviteUrl}>
+              <DiscordIcon />
+              Join
+            </a>
+          )
+        }
+      </header>
+      <main>
+        <slot />
+      </main>
+    </div>
+  </body>
+</html>

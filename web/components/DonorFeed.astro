@@ -1,0 +1,106 @@
+---
+import type { FeedItem } from '../../src/web/api.js';
+
+interface Props {
+  items: FeedItem[];
+  charityName: string;
+  locale: string;
+  timeZone: string;
+}
+
+const { items, charityName, locale, timeZone } = Astro.props;
+
+function timeAgo(at: number): string {
+  const seconds = Math.max(0, Math.round((Date.now() - at) / 1000));
+  if (seconds < 60) return 'just now';
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  const days = Math.round(hours / 24);
+  if (days < 30) return `${days} day${days === 1 ? '' : 's'} ago`;
+  return new Date(at).toLocaleDateString(locale, { day: 'numeric', month: 'short', timeZone });
+}
+---
+
+{
+  items.length === 0 ? (
+    <div class="empty">
+      <p class="empty-title">Be the first on the wall</p>
+      <p class="muted">Donate through our Discord and your name and picture will appear here.</p>
+    </div>
+  ) : (
+    <ol class="feed">
+      {items.map((item) => (
+        <li class="donor">
+          <img class="avatar" src={item.avatarUrl} alt="" width="48" height="48" loading="lazy" decoding="async" referrerpolicy="no-referrer" />
+          <div class="who">
+            <span class="name">{item.name}</span>
+            <span class="what muted">donated to {charityName}</span>
+          </div>
+          <time class="when muted" datetime={new Date(item.at).toISOString()}>
+            {timeAgo(item.at)}
+          </time>
+        </li>
+      ))}
+    </ol>
+  )
+}
+
+<style>
+  .feed {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .donor {
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 0;
+    border-top: 1px solid var(--line);
+  }
+  .donor:first-child {
+    border-top: 0;
+    padding-top: 4px;
+  }
+  .avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: var(--field);
+    box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--accent);
+  }
+  .who {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .name {
+    font-weight: 700;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .what,
+  .when {
+    font-size: 0.875rem;
+  }
+  .when {
+    white-space: nowrap;
+    font-family: var(--mono);
+    font-size: 0.8125rem;
+  }
+  .empty {
+    text-align: center;
+    padding: 20px 8px 8px;
+  }
+  .empty-title {
+    font-weight: 700;
+    margin: 0 0 4px;
+  }
+  .empty p {
+    margin: 0;
+  }
+</style>

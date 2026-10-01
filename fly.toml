@@ -1,0 +1,81 @@
+# Fly.io settings for your donor bot.
+#
+# 1. Change `app` to the name you chose with `fly apps create` (it must be unique on Fly).
+# 2. Fill in the [env] block below. Anything marked CHANGE-ME must be changed.
+# 3. The two secrets (DISCORD_TOKEN and JUSTGIVING_APP_ID) are NOT set here. Set them with
+#    `fly secrets set` (see README, step 5).
+#
+# Run `npm run check-config` at any time to check your settings.
+
+app = "CHANGE-ME"
+primary_region = "lhr" # Closest region to your members: lhr London, iad Virginia, syd Sydney... (`fly platform regions`)
+kill_signal = "SIGTERM"
+kill_timeout = "10s"
+# Overflow memory on disk, as a safety net: a burst that needs more than the machine's
+# memory spills into swap (slower) instead of crashing the bot.
+swap_size_mb = 512
+
+[build]
+
+[env]
+  # ---- Your Discord server ------------------------------------------------
+  DISCORD_GUILD_ID = "CHANGE-ME"   # Right-click your server icon > Copy Server ID
+  DONOR_ROLE_ID = "CHANGE-ME"      # Server Settings > Roles > right-click the donor role > Copy Role ID
+  DISCORD_INVITE_URL = ""          # Optional. A permanent invite link, shown as the "Join" button
+
+  # ---- Your charity -------------------------------------------------------
+  CHARITY_NAME = "CHANGE-ME"       # As you want it shown, e.g. "British Red Cross"
+  CHARITY_PAGE = ""                # Your JustGiving page address. Leave empty until the page exists
+
+  # ---- Your community and branding ----------------------------------------
+  COMMUNITY_NAME = "CHANGE-ME"     # Shown in the site header and in Discord messages
+  COMMUNITY_URL = ""               # Optional. Where the header name/logo links to
+  ACCENT_COLOR = "#7c5cff"         # Buttons, highlights and the Discord card colour
+  SITE_LOGO = ""                   # Optional. A file in public/, e.g. "/logo.svg". Empty shows the name as text
+  SITE_PREVIEW_IMAGE = ""          # Optional. A 16:9 image in public/, e.g. "/preview.png", shown when the link is shared
+  SITE_HEADLINE = ""               # Optional. Default: "Raising money for <charity>"
+  REWARD_TEXT = ""                 # Optional. Default: "you'll get the {role} role as a thank you"
+  TIME_ZONE = "UTC"                # e.g. "Europe/London", "America/New_York"
+  LOCALE = "en-GB"                 # Number and date format, e.g. "en-US"
+
+  # ---- The drive ----------------------------------------------------------
+  DRIVE_ENDS_AT = ""               # Optional end, in UTC, e.g. "2027-01-01T00:00:00Z". Empty = no end date
+  SEASONAL_THEME = "false"         # "true" adds light snow and a festive footer in December
+  SEND_DM_ON_SUCCESS = "true"      # DM donors a thank-you when their role is added
+
+  # ---- The website --------------------------------------------------------
+  PUBLIC_BASE_URL = "https://CHANGE-ME.fly.dev"   # https://<your app name>.fly.dev, or your own domain
+  PORT = "3000"
+  DATABASE_PATH = "/data/donors.db"
+
+# SQLite lives on this volume. Only ever run ONE machine: the database and the
+# Discord gateway connection can't be shared between machines.
+[mounts]
+  source = "donor_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  # The Discord bot must stay connected, so the machine never sleeps.
+  auto_stop_machines = "off"
+  auto_start_machines = false
+  min_machines_running = 1
+
+  # Fly's default lets only ~25 connections through at once. Donors can return from
+  # JustGiving in large bursts, so allow far more (each request is small and mostly waiting).
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 800
+    hard_limit = 1500
+
+  [[http_service.checks]]
+    grace_period = "20s"
+    interval = "30s"
+    method = "GET"
+    path = "/health"
+    timeout = "5s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

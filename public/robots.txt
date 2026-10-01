@@ -1,0 +1,3 @@
+User-agent: *
+# JustGiving return links carry personal codes; nothing to index there.
+Disallow: /justgiving/

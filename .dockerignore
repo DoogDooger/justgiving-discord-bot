@@ -1,0 +1,13 @@
+node_modules
+dist
+data
+coverage
+tests
+.git
+.github
+.env
+.env.*
+*.log
+*.db
+web-dist
+.astro

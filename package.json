@@ -1,0 +1,40 @@
+{
+  "name": "justgiving-discord-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Discord bot that gives a donor role to members who donate to your charity through JustGiving",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && npm run build:web",
+    "build:web": "astro build",
+    "start": "node dist/index.js",
+    "dev": "astro build && tsx watch src/index.ts",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "register-commands": "tsx src/discord/register-commands.ts",
+    "check-config": "tsx src/check-config.ts",
+    "announce": "tsx src/discord/announce.ts",
+    "preview:web": "astro build && tsx src/preview-web.ts"
+  },
+  "dependencies": {
+    "@astrojs/node": "^11.1.6",
+    "astro": "^7.3.5",
+    "better-sqlite3": "^13.0.3",
+    "discord.js": "^14.27.0",
+    "dotenv": "^18.0.4",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.7.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.20.4",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  }
+}

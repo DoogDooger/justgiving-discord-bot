@@ -1,0 +1,143 @@
+/*
+ * Neutral dark theme. The accent colour comes from the ACCENT_COLOR setting: the layout
+ * sets --accent and --on-accent on <html>, and everything else is derived from them here.
+ * To restyle the site, change the variables below; you shouldn't need to touch the pages.
+ */
+
+:root {
+  --accent: #7c5cff;
+  --on-accent: #ffffff;
+
+  --bg: #0b0b0d;
+  --panel: #17171a;
+  --field: #0b0b0d;
+  --line: #27272b;
+  --text: #fafafa;
+  --muted: #a1a1aa;
+  --green: #22c55e;
+  --amber: #f59e0b;
+  --red: #ef4444;
+  --gold: #ffc94d;
+  --radius: 10px;
+
+  /* Derived from the accent. */
+  --accent-text: color-mix(in srgb, var(--accent) 72%, white);
+  --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
+  --accent-hover: color-mix(in srgb, var(--accent) 86%, black);
+
+  --font: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(900px 420px at 50% -160px, var(--accent-soft), transparent 70%),
+    var(--bg);
+  background-repeat: no-repeat;
+  color: var(--text);
+  font: 16px/1.6 var(--font);
+}
+
+a { color: var(--accent-text); }
+
+.page {
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 0 16px 64px;
+}
+
+.site-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 22px 0 40px;
+}
+.site-header .brand {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  color: var(--text);
+  font-weight: 800;
+  font-size: 1.125rem;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+}
+.site-header .brand img { height: 28px; width: auto; max-width: 220px; display: block; }
+
+/* Big headings and figures. */
+.display {
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  line-height: 1.05;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 24px;
+}
+.card + .card { margin-top: 16px; }
+@media (max-width: 520px) {
+  .card { padding: 20px 16px; }
+}
+
+/* Button with an arrow block on the right. */
+.button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 2px 50px 2px 20px;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background 0.2s ease;
+}
+.button::after {
+  content: '→';
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  bottom: 4px;
+  width: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: calc(var(--radius) - 3px);
+  background: color-mix(in srgb, var(--on-accent) 18%, transparent);
+  transition: transform 0.2s ease;
+}
+.button:hover { background: var(--accent-hover); }
+.button:hover::after { transform: translateX(2px); }
+.button:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
+.button svg { width: 16px; height: 16px; flex: none; }
+.button.secondary { background: var(--panel); color: var(--text); box-shadow: inset 0 0 0 1px var(--line); }
+.button.secondary::after { background: var(--line); }
+.button.secondary:hover { background: var(--line); }
+
+.actions { display: flex; flex-wrap: wrap; gap: 12px; }
+
+.muted { color: var(--muted); }
+
+code {
+  font: 0.9em var(--mono);
+  background: var(--field);
+  color: var(--accent-text);
+  padding: 2px 6px;
+  border-radius: 6px;
+}
