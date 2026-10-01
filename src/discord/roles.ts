@@ -58,7 +58,7 @@ export async function checkRolePermissions(rest: REST, guildId: string, botUserI
     me = (await rest.get(Routes.guildMember(guildId, botUserId))) as APIGuildMember;
   } catch (error) {
     if (error instanceof DiscordAPIError && (error.status === 403 || error.status === 404)) {
-      return ['The bot is not in the Discord server set in DISCORD_GUILD_ID. Invite it using the link in the README.'];
+      return ['The bot is not in the Discord server set in DISCORD_GUILD_ID. Open the invite link printed above and add it to your server.'];
     }
     throw error;
   }

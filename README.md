@@ -48,6 +48,8 @@ You'll need:
 
 Allow about half an hour. Every setting lives in **[`fly.toml`](fly.toml)**; you'll fill it in as you go, and `npm run check-config` tells you in plain English what's still missing.
 
+> **Prefer to be guided?** Give [`SETUP.md`](SETUP.md) to an AI assistant (Claude Code, Cursor, ChatGPT and similar) and say "help me set this up". It asks you the questions below one at a time, fills in the settings and checks each step. It's written so the assistant never asks you to paste your secrets into the chat.
+
 ### 1. Get your own copy
 
 1. Click **Use this template → Create a new repository** at the top of this page. A private repository is fine.
@@ -107,7 +109,7 @@ The bot doesn't need your JustGiving password. If the page isn't ready yet, leav
 4. Create the storage for the database (1 GB is plenty):
 
    ```sh
-   fly volumes create donor_data --region lhr --size 1
+   fly volumes create donor_data --region lhr --size 1 --yes
    ```
 
    Use the same region as `primary_region`.
@@ -129,9 +131,11 @@ The bot doesn't need your JustGiving password. If the page isn't ready yet, leav
 7. Deploy, then register the slash commands:
 
    ```sh
-   fly deploy
+   fly deploy --ha=false
    npm run register-commands
    ```
+
+   `--ha=false` tells Fly to run one machine, which is what this bot needs. Later deploys are just `fly deploy`.
 
 Your bot is live. Open `https://<name>.fly.dev` to see your donor wall, and run `/donate` in your server. To test the whole flow, make a small real donation through your own `/donate` link: you should land on a thank-you page and get the role.
 

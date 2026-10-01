@@ -11,7 +11,7 @@ A Discord bot plus a small website. Members who donate to a charity through Just
 - `/claim <donation-id>` is the manual fallback; `/donor-status` re-applies a missing role; `/donor-wall` hides or shows a donor; `/donor-forget` deletes a member's data.
 - A daily re-check revokes donations that were refunded on JustGiving and removes the role.
 
-See [README.md](README.md) for setup and settings.
+See [README.md](README.md) for setup and settings. If someone asks you to help them set the bot up, follow [SETUP.md](SETUP.md).
 
 ## Stack and hosting
 
