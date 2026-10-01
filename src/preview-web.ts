@@ -55,7 +55,15 @@ users.forEach((id, i) => {
   store.insertClaim({ donationId: String(9000 + i), discordUserId: id, token, pageShortName: charity.pageShortName, source: 'redirect' });
 });
 const justGiving: JustGivingApi = {
-  getDonation: async (id) => (id === '1' ? { id, status: 'Pending', thirdPartyReference: store.getOrCreateToken(users[0]!), charityId: null } : null),
+  // Sample donations for previewing each return page: 1 = still processing, 3 = refunded,
+  // anything from 100 up = accepted (a new number each time shows the thank-you page again).
+  getDonation: async (id) => {
+    const reference = store.getOrCreateToken(users[0]!);
+    if (id === '1') return { id, status: 'Pending', thirdPartyReference: reference, charityId: null };
+    if (id === '3') return { id, status: 'Refunded', thirdPartyReference: reference, charityId: '4321' };
+    if (Number(id) >= 100) return { id, status: 'Accepted', thirdPartyReference: reference, charityId: '4321' };
+    return null;
+  },
   getDonationCharityId: async () => null,
   pageHasDonation: async () => false,
   getPage: async () => ({ pageId: '1', charityId: '4321', charityName: charity.name }),
@@ -78,7 +86,19 @@ const ctx: AppContext = {
 
 const astro = await loadAstroHandler();
 const server = createWebServer(() => ctx, astro).listen(PORT, () => {
-  console.log(`Preview: http://localhost:${PORT}/  (return page: http://localhost:${PORT}/justgiving/return?t=${store.getOrCreateToken(users[0]!)}&donationId=1)`);
+  const base = `http://localhost:${PORT}`;
+  const back = `${base}/justgiving/return?t=${store.getOrCreateToken(users[0]!)}&donationId=`;
+  console.log(
+    [
+      `Preview running. Open these in your browser:`,
+      `  Home page and donor wall   ${base}/`,
+      `  Thank you (role added)     ${back}${100 + Math.floor(Math.random() * 900000)}`,
+      `  Still processing           ${back}1`,
+      `  Donation not accepted      ${back}3`,
+      `  Nothing came back          ${base}/justgiving/return`,
+      `Press Ctrl+C to stop.`,
+    ].join('\n'),
+  );
 });
 server.on('error', (error: NodeJS.ErrnoException) => {
   console.error(error.code === 'EADDRINUSE' ? `Port ${PORT} is in use (another preview still running?). Try PREVIEW_PORT=4322 npm run preview:web` : error.message);
