@@ -12,6 +12,7 @@ import type { PageDirectory } from './pages.js';
  *  4. It went to the charity of our configured page (charity ID from the donation
  *     record or the reference lookup), or failing that, it is listed on our page.
  *  5. It hasn't been claimed before.
+ *  6. It was made before the drive deadline, if one is set.
  * Amounts are not checked: JustGiving's own minimum (2 in every currency) is enough.
  */
 
@@ -31,6 +32,7 @@ export type FailureReason =
   | 'not_your_reference'
   | 'pending'
   | 'not_accepted'
+  | 'after_deadline'
   | 'wrong_page'
   | 'api_error';
 
@@ -42,6 +44,7 @@ export interface VerifyDeps {
   justGiving: JustGivingApi;
   store: Pick<Store, 'getTokenOwner' | 'getClaim'>;
   charity: CharityConfig;
+  driveEndsAt?: Date | null;
   pages: Pick<PageDirectory, 'getPageOrThrow'>;
   /**
    * JustGiving can take a few seconds to list a brand-new donation. When the
@@ -103,6 +106,11 @@ export async function verifyDonation(request: VerifyRequest, deps: VerifyDeps): 
 
     if (donation.status === 'Pending') return fail('pending', { discordUserId });
     if (donation.status !== 'Accepted') return fail('not_accepted', { discordUserId, detail: donation.status });
+
+    if (deps.driveEndsAt && Date.now() >= deps.driveEndsAt.getTime()) {
+      if (donation.donatedAtMs === null) return fail('api_error', { discordUserId, detail: 'donation date missing' });
+      if (donation.donatedAtMs >= deps.driveEndsAt.getTime()) return fail('after_deadline', { discordUserId });
+    }
 
     const accept = (): VerifyResult => ({
       ok: true,

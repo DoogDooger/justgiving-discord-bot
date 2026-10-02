@@ -38,6 +38,8 @@ export interface Donation {
   id: string;
   status: DonationStatus;
   thirdPartyReference: string | null;
+  /** UTC epoch milliseconds from JustGiving's donationDate, or null when unavailable. */
+  donatedAtMs: number | null;
   /** Charity the donation went to, when JustGiving includes it (it does for live donations). */
   charityId: string | null;
 }
@@ -136,13 +138,19 @@ export function createJustGivingClient(options: { appId: string; apiBase: string
   const record = (value: unknown): Record<string, unknown> =>
     value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
 
+  const epochMs = (value: unknown): number | null => {
+    const m = typeof value === 'string' ? /^\/Date\((-?\d+)(?:[+-]\d{4})?\)\/$/.exec(value) : null;
+    const n = m ? Number(m[1]) : NaN;
+    return Number.isFinite(n) ? n : null;
+  };
+
   const toDonation = (raw: unknown): Donation | null => {
     const r = record(raw);
     const id = str(r.id);
     const status = str(r.status);
     if (!id || !status) return null;
     const reference = str(r.thirdPartyReference)?.trim();
-    return { id, status, thirdPartyReference: reference ? reference : null, charityId: str(r.charityId) };
+    return { id, status, thirdPartyReference: reference ? reference : null, charityId: str(r.charityId), donatedAtMs: epochMs(r.donationDate) };
   };
 
   const donationList = (raw: unknown): unknown[] => {

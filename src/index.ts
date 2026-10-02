@@ -24,6 +24,7 @@ const ctx: AppContext = {
     justGiving,
     store,
     charity: config.charity,
+    driveEndsAt: config.driveEndsAt,
     pages,
     listingRetries: 3,
     retryDelayMs: 3000,

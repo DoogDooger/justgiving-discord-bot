@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { verifyDonation } from '../src/verification.js';
 import { USER_A, USER_B, charity, donation, setup } from './helpers.js';
 
@@ -65,6 +65,63 @@ describe('verifyDonation: redirect flow', () => {
     const { deps, tokens } = setup((t) => ({ donations: { '100': donation('100', t.a) } }));
     deps.charity = { ...charity, pageShortName: null };
     expect(await verifyDonation({ source: 'redirect', donationId: '100', token: tokens.a }, deps)).toMatchObject({ reason: 'not_configured' });
+  });
+});
+
+describe('verifyDonation: drive deadline', () => {
+  const driveEndsAt = new Date('2026-10-01T00:00:00Z');
+
+  it('accepts a donation with no date before the deadline', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-30T00:00:00Z'));
+    try {
+      const { deps } = setup((t) => ({ donations: { '100': donation('100', t.a, 'Accepted', 'C1', null) } }));
+      expect(await verifyDonation({ source: 'claim', donationId: '100', discordUserId: USER_A }, { ...deps, driveEndsAt })).toMatchObject({ ok: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('accepts a pre-deadline donation claimed after the drive ends', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-02T00:00:00Z'));
+    try {
+      const { deps } = setup((t) => ({ donations: { '100': donation('100', t.a, 'Accepted', 'C1', driveEndsAt.getTime() - 1) } }));
+      expect(await verifyDonation({ source: 'claim', donationId: '100', discordUserId: USER_A }, { ...deps, driveEndsAt })).toMatchObject({ ok: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([0, 1])('rejects a donation made %s ms after the deadline', async (delay) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-02T00:00:00Z'));
+    try {
+      const { deps, tokens } = setup((t) => ({ donations: { '100': donation('100', t.a, 'Accepted', 'C1', driveEndsAt.getTime() + delay) } }));
+      expect(await verifyDonation({ source: 'redirect', donationId: '100', token: tokens.a }, { ...deps, driveEndsAt })).toMatchObject({
+        ok: false, reason: 'after_deadline', discordUserId: USER_A,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([undefined, null])('does not require a donation date when the deadline is %j', async (driveEndsAt) => {
+    const { deps, tokens } = setup((t) => ({ donations: { '100': donation('100', t.a, 'Accepted', 'C1') } }));
+    expect(await verifyDonation({ source: 'redirect', donationId: '100', token: tokens.a }, { ...deps, driveEndsAt })).toMatchObject({ ok: true });
+  });
+
+  it('reports api_error when a deadline is set but the donation date is missing', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-02T00:00:00Z'));
+    try {
+      const { deps, tokens } = setup((t) => ({ donations: { '100': donation('100', t.a, 'Accepted', 'C1') } }));
+      expect(await verifyDonation({ source: 'redirect', donationId: '100', token: tokens.a }, { ...deps, driveEndsAt })).toMatchObject({
+        ok: false, reason: 'api_error', discordUserId: USER_A, detail: 'donation date missing',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

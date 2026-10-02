@@ -58,6 +58,11 @@ export function failureMessage(reason: FailureReason): { title: string; text: st
         title: "This donation didn't go through",
         text: 'JustGiving shows this donation as not completed (for example cancelled, rejected or refunded), so it can\'t be used for a role.',
       };
+    case 'after_deadline':
+      return {
+        title: 'This donation was made after the drive ended',
+        text: 'Only donations made before the drive ended unlock the donor role. Your donation still supports the charity.',
+      };
     case 'wrong_page':
       return {
         title: "We couldn't match this donation to our charity",

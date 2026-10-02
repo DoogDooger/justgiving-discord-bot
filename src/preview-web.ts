@@ -59,9 +59,9 @@ const justGiving: JustGivingApi = {
   // anything from 100 up = accepted (a new number each time shows the thank-you page again).
   getDonation: async (id) => {
     const reference = store.getOrCreateToken(users[0]!);
-    if (id === '1') return { id, status: 'Pending', thirdPartyReference: reference, charityId: null };
-    if (id === '3') return { id, status: 'Refunded', thirdPartyReference: reference, charityId: '4321' };
-    if (Number(id) >= 100) return { id, status: 'Accepted', thirdPartyReference: reference, charityId: '4321' };
+    if (id === '1') return { id, status: 'Pending', thirdPartyReference: reference, charityId: null, donatedAtMs: Date.now() };
+    if (id === '3') return { id, status: 'Refunded', thirdPartyReference: reference, charityId: '4321', donatedAtMs: Date.now() };
+    if (Number(id) >= 100) return { id, status: 'Accepted', thirdPartyReference: reference, charityId: '4321', donatedAtMs: Date.now() };
     return null;
   },
   getDonationCharityId: async () => null,
