@@ -5,13 +5,13 @@ export function failureMessage(reason: FailureReason): { title: string; text: st
   switch (reason) {
     case 'invalid_donation_id':
       return {
-        title: "That doesn't look like a donation ID",
-        text: 'A JustGiving donation ID is a number. You can find it in your JustGiving confirmation email.',
+        title: "That doesn't look like a receipt reference",
+        text: 'Enter the reference from your JustGiving receipt email. It is a number that looks like 123456789/1.',
       };
     case 'invalid_token':
       return {
         title: 'This link is incomplete',
-        text: 'Something was missing from the link JustGiving sent you back with. Use /claim with your donation ID from your JustGiving confirmation email.',
+        text: 'Something was missing from the link JustGiving sent you back with. Use /claim with the reference from your JustGiving receipt email.',
       };
     case 'not_configured':
       return {
@@ -30,8 +30,8 @@ export function failureMessage(reason: FailureReason): { title: string; text: st
       };
     case 'donation_not_found':
       return {
-        title: "We couldn't find that donation",
-        text: "JustGiving doesn't know that donation ID yet. If you've only just donated, wait a few minutes and try /claim again.",
+        title: "We couldn't find that donation on our page",
+        text: "No donation on our JustGiving page has that reference. Check it against your receipt email (it looks like 123456789/1). If you've only just donated, wait a few minutes and try /claim again. A donation made to a different JustGiving page can't be linked here.",
       };
     case 'missing_reference':
       return {
@@ -51,7 +51,7 @@ export function failureMessage(reason: FailureReason): { title: string; text: st
     case 'pending':
       return {
         title: 'Your donation is still processing',
-        text: 'JustGiving is still processing your donation. Try /claim with your donation ID again in a few minutes.',
+        text: 'JustGiving is still processing your donation. Try /claim with your receipt reference again in a few minutes.',
       };
     case 'not_accepted':
       return {

@@ -17,7 +17,7 @@ Other commands:
 
 | Command | What it does |
 |---|---|
-| `/claim donation_id:<number>` | Links a donation by its ID, if the automatic step didn't happen (closed tab, slow connection). There's also an **I've already donated** button under `/donate`. |
+| `/claim` | Links a donation if the automatic step didn't happen (closed tab, slow connection). The member enters the reference from their JustGiving receipt email (it looks like `123456789/1`). There's also an **I've already donated** button under `/donate`. |
 | `/donor-status` | Shows how many donations a member has linked, and adds the role back if it's missing. |
 | `/donor-wall` | Shows or hides the member on the donor wall. |
 | `/donor-forget` | Deletes everything the bot stores about the member, after a confirmation. |

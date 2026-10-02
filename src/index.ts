@@ -8,12 +8,14 @@ import { recheckDonations, syncPendingRoles } from './donations.js';
 import { createJustGivingClient } from './justgiving.js';
 import { PageDirectory } from './pages.js';
 import { ProfileDirectory } from './profiles.js';
+import { ReceiptDirectory } from './receipts.js';
 import { createWebServer, loadAstroHandler } from './web/server.js';
 
 const config = loadConfigOrExit();
 const store = openStore(config.databasePath);
 const justGiving = createJustGivingClient({ appId: config.justGivingAppId, apiBase: config.justGivingApiBase });
 const pages = new PageDirectory(justGiving, config.charity);
+const receipts = new ReceiptDirectory(justGiving, config.charity);
 const client = createDiscordClient();
 
 const ctx: AppContext = {
@@ -26,6 +28,7 @@ const ctx: AppContext = {
     charity: config.charity,
     driveEndsAt: config.driveEndsAt,
     pages,
+    receipts,
     listingRetries: 3,
     retryDelayMs: 3000,
     discord: createDiscordActions(client, config.guildId, config.site),
@@ -45,6 +48,8 @@ client.once(Events.ClientReady, async (ready) => {
     console.error('Could not check Discord permissions:', error instanceof Error ? error.message : error);
   }
   await pages.warmUp();
+  // In the background: one JustGiving lookup per donation on the page, so it takes a minute or two.
+  void receipts.warmUp();
 
   // Background role queue: picks up roles that were still waiting on Discord's rate
   // limit (or interrupted by a restart). One pass at a time.

@@ -55,7 +55,7 @@ export function donateEmbed(options: {
   });
 
   if (endsAt) embed.addFields({ name: 'Drive ends', value: `${discordDate(endsAt, 'f')} (${discordDate(endsAt, 'R')})`, inline: true });
-  embed.addFields({ name: 'Role not added?', value: "Tap **I've already donated** and enter your donation ID.", inline: true });
+  embed.addFields({ name: 'Role not added?', value: "Tap **I've already donated** and enter the reference from your JustGiving receipt email.", inline: true });
   if (wallUrl) embed.setURL(wallUrl).addFields(wallField(wallUrl, hiddenFromWall));
 
   return embed;

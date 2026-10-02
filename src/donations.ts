@@ -2,6 +2,7 @@ import type { CharityConfig } from './config.js';
 import type { Store } from './db.js';
 import type { JustGivingApi } from './justgiving.js';
 import type { PageDirectory } from './pages.js';
+import type { ReceiptDirectory } from './receipts.js';
 import { verifyDonation, type FailureReason, type VerifyRequest } from './verification.js';
 
 export type RoleResult = 'added' | 'not_member' | 'failed';
@@ -21,6 +22,8 @@ export interface DonationDeps {
   charity: CharityConfig;
   driveEndsAt?: Date | null;
   pages: Pick<PageDirectory, 'getPageOrThrow'>;
+  /** Finds a donation on our page from the reference on a donor's receipt. */
+  receipts: Pick<ReceiptDirectory, 'find'>;
   listingRetries?: number;
   retryDelayMs?: number;
   /** How long processDonation waits for the role before answering 'queued'. */
@@ -68,6 +71,28 @@ async function grantRole(deps: DonationDeps, claim: { donationId: string; discor
     void deps.discord.sendThanks(claim.discordUserId, charity, claim.donationId).catch(() => undefined);
   }
   return role;
+}
+
+/** A receipt reference as donors see it ("123456789/1"), or a bare number that could be one or a donation ID. */
+const CLAIM_INPUT = /^(\d{1,15})(\s*\/\s*\d+)?$/;
+
+/**
+ * Turns what a member typed into /claim into a donation ID. Donors only ever see the
+ * reference on their JustGiving receipt ("123456789/1"), which is not the donation ID,
+ * so that is looked up among the donations on our page first. A bare number that isn't
+ * a receipt reference there is taken to be a donation ID, as before.
+ *
+ * Returns null when it is certainly a receipt reference ("…/1") and no donation on our
+ * page has it: given to a different page, mistyped, or not listed by JustGiving yet.
+ * This only finds the donation; whether it counts is still decided in verification.ts.
+ */
+export async function resolveClaimInput(input: string, deps: Pick<DonationDeps, 'receipts'>): Promise<string | null> {
+  const match = CLAIM_INPUT.exec(input.trim());
+  // Not a number at all: pass it on so verification answers "that doesn't look like a receipt reference".
+  if (!match) return input.trim();
+  const [, digits, slash] = match;
+  const found = await deps.receipts.find(digits!);
+  return found ?? (slash ? null : digits!);
 }
 
 /** Verifies a donation, records the claim, and gives the charity's role. */

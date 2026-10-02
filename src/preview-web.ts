@@ -10,6 +10,7 @@ import type { DiscordActions } from './donations.js';
 import type { JustGivingApi } from './justgiving.js';
 import { PageDirectory } from './pages.js';
 import { defaultAvatarUrl } from './profiles.js';
+import { ReceiptDirectory } from './receipts.js';
 import { createWebServer, loadAstroHandler } from './web/server.js';
 
 const PORT = Number(process.env.PREVIEW_PORT) || 4321;
@@ -59,13 +60,14 @@ const justGiving: JustGivingApi = {
   // anything from 100 up = accepted (a new number each time shows the thank-you page again).
   getDonation: async (id) => {
     const reference = store.getOrCreateToken(users[0]!);
-    if (id === '1') return { id, status: 'Pending', thirdPartyReference: reference, charityId: null, donatedAtMs: Date.now() };
-    if (id === '3') return { id, status: 'Refunded', thirdPartyReference: reference, charityId: '4321', donatedAtMs: Date.now() };
-    if (Number(id) >= 100) return { id, status: 'Accepted', thirdPartyReference: reference, charityId: '4321', donatedAtMs: Date.now() };
+    if (id === '1') return { id, status: 'Pending', thirdPartyReference: reference, charityId: null, donatedAtMs: Date.now(), receiptRef: null };
+    if (id === '3') return { id, status: 'Refunded', thirdPartyReference: reference, charityId: '4321', donatedAtMs: Date.now(), receiptRef: null };
+    if (Number(id) >= 100) return { id, status: 'Accepted', thirdPartyReference: reference, charityId: '4321', donatedAtMs: Date.now(), receiptRef: null };
     return null;
   },
   getDonationCharityId: async () => null,
   pageHasDonation: async () => false,
+  getPageDonationIds: async () => [],
   getPage: async () => ({ pageId: '1', charityId: '4321', charityName: charity.name }),
   getPageTotals: async () => ({ raised: 437.5, target: 1000, currencySymbol: '£' }),
   // Sample public amounts for a few donors; the rest are 'hidden'.
@@ -78,7 +80,7 @@ const discord: DiscordActions = { addRole: async () => 'added', removeRole: asyn
 const ctx: AppContext = {
   config,
   pages,
-  donations: { justGiving, store, charity, pages, discord, sendDmOnSuccess: false },
+  donations: { justGiving, store, charity, pages, receipts: new ReceiptDirectory(justGiving, charity), discord, sendDmOnSuccess: false },
   profiles: {
     getMany: async (ids) => new Map(ids.map((id) => [id, { name: names[users.indexOf(id)] ?? 'Donor', avatarUrl: defaultAvatarUrl(id) }])),
   },

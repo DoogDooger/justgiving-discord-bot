@@ -3,6 +3,7 @@ import { openStore, type Store } from '../src/db.js';
 import type { DiscordActions, DonationDeps, RoleResult } from '../src/donations.js';
 import { JustGivingError, type Donation, type JustGivingApi, type PageInfo } from '../src/justgiving.js';
 import { PageDirectory } from '../src/pages.js';
+import { ReceiptDirectory } from '../src/receipts.js';
 
 export const USER_A = '111111111111111111';
 export const USER_B = '222222222222222222';
@@ -57,6 +58,10 @@ export function fakeJustGiving(options: FakeJustGivingOptions = {}): JustGivingA
       check();
       return Boolean(options.pages?.[page]?.includes(id));
     },
+    async getPageDonationIds(page) {
+      check();
+      return [...(options.pages?.[page] ?? [])];
+    },
     async getPublicDonationAmounts(page) {
       check();
       return new Map(Object.entries(options.amounts?.[page] ?? {}));
@@ -74,8 +79,8 @@ export function fakeJustGiving(options: FakeJustGivingOptions = {}): JustGivingA
   };
 }
 
-export function donation(id: string, reference: string | null, status = 'Accepted', charityId: string | null = null, donatedAtMs: number | null = null): Donation {
-  return { id, status, thirdPartyReference: reference, charityId, donatedAtMs };
+export function donation(id: string, reference: string | null, status = 'Accepted', charityId: string | null = null, donatedAtMs: number | null = null, receiptRef: string | null = null): Donation {
+  return { id, status, thirdPartyReference: reference, charityId, donatedAtMs, receiptRef };
 }
 
 export function fakeDiscord(result: RoleResult = 'added') {
@@ -118,6 +123,7 @@ export function setup(
     store,
     charity,
     pages: new PageDirectory(justGiving, charity),
+    receipts: new ReceiptDirectory(justGiving, charity),
     discord: discord.actions,
     sendDmOnSuccess: true,
   };

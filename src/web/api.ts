@@ -173,7 +173,7 @@ export function createWebApi(getContext: () => AppContext): WebApi {
           status: 400,
           tone: 'error',
           title: 'No donation came back from JustGiving',
-          paragraphs: ['If you did donate, tap "I\'ve already donated" under /donate in Discord and enter the donation ID from your JustGiving confirmation email.'],
+          paragraphs: ['If you did donate, tap "I\'ve already donated" under /donate in Discord and enter the reference from your JustGiving receipt email.'],
           retryUrl: null,
           inviteUrl,
         };

@@ -8,7 +8,7 @@ A Discord bot plus a small website. Members who donate to a charity through Just
 
 - `/donate` asks whether to appear on the donor wall, then gives the member a personal JustGiving link carrying a short reference token.
 - After donating, JustGiving redirects to `/justgiving/return`; the bot verifies the donation with the JustGiving API and adds the donor role.
-- `/claim <donation-id>` is the manual fallback; `/donor-status` re-applies a missing role; `/donor-wall` hides or shows a donor; `/donor-forget` deletes a member's data.
+- `/claim <receipt reference>` is the manual fallback. Donors only see the reference on their JustGiving receipt (`123456789/1`, JustGiving's `donationRef`), which is not the donation ID, so `resolveClaimInput` finds the donation through `ReceiptDirectory` (`src/receipts.ts`), an in-memory index of the donations on the page. Never tell members to enter a "donation ID": they don't have one; `/donor-status` re-applies a missing role; `/donor-wall` hides or shows a donor; `/donor-forget` deletes a member's data.
 - A daily re-check revokes donations that were refunded on JustGiving and removes the role.
 
 See [README.md](README.md) for setup and settings. If someone asks you to help them set the bot up, follow [SETUP.md](SETUP.md).

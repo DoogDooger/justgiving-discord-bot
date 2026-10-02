@@ -39,9 +39,9 @@ function fakeFetch(routes: Record<string, { status?: number; body?: unknown }>) 
 
 describe('JustGiving client', () => {
   it('reads a donation and normalises the ID to a string', async () => {
-    const { fn } = fakeFetch({ '/donation/1234': { body: { id: 1234, status: 'Accepted', thirdPartyReference: ' ABCD2345 ', charityId: 4321 } } });
+    const { fn } = fakeFetch({ '/donation/1234': { body: { id: 1234, status: 'Accepted', thirdPartyReference: ' ABCD2345 ', charityId: 4321, donationRef: '123456789' } } });
     const client = createJustGivingClient({ appId: 'APPID', apiBase: 'https://api.test', fetch: fn });
-    expect(await client.getDonation('1234')).toEqual({ id: '1234', status: 'Accepted', thirdPartyReference: 'ABCD2345', charityId: '4321', donatedAtMs: null });
+    expect(await client.getDonation('1234')).toEqual({ id: '1234', status: 'Accepted', thirdPartyReference: 'ABCD2345', charityId: '4321', donatedAtMs: null, receiptRef: '123456789' });
   });
 
   it.each(['+0000', '+0100', '-0100', ''])('reads the UTC donation timestamp without applying offset %s', async (offset) => {

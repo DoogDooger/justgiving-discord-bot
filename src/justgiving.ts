@@ -22,6 +22,8 @@
  *       -> { donations: [{ id, amount, ... }], pagination: { nextPageCursor } } newest first.
  *          Fallback check that a donation is on our page, and the source of the public
  *          amounts for the top donors list (amount is null when the donor hid it).
+ *          donationRef (the receipt reference) is null in this list; only the single
+ *          donation endpoint above returns it.
  */
 
 export const DONATION_ID_PLACEHOLDER = 'JUSTGIVING-DONATION-ID';
@@ -42,6 +44,11 @@ export interface Donation {
   donatedAtMs: number | null;
   /** Charity the donation went to, when JustGiving includes it (it does for live donations). */
   charityId: string | null;
+  /**
+   * JustGiving's donationRef: the reference printed on the donor's receipt as "<ref>/1".
+   * A different number from the donation ID, and the only one a donor normally sees.
+   */
+  receiptRef: string | null;
 }
 
 export interface PageInfo {
@@ -66,6 +73,8 @@ export interface JustGivingApi {
   getDonationCharityId(reference: string, donationId: string): Promise<string | null>;
   /** True if the donation is in the page's (most recent) donations. */
   pageHasDonation(pagePath: string, donationId: string): Promise<boolean>;
+  /** IDs of every donation on the page, newest first. */
+  getPageDonationIds(pagePath: string): Promise<string[]>;
   getPage(pagePath: string): Promise<PageInfo>;
   /** Live fundraising totals for a page (the same page-details response, not cached). */
   getPageTotals(pagePath: string): Promise<PageTotals>;
@@ -150,7 +159,7 @@ export function createJustGivingClient(options: { appId: string; apiBase: string
     const status = str(r.status);
     if (!id || !status) return null;
     const reference = str(r.thirdPartyReference)?.trim();
-    return { id, status, thirdPartyReference: reference ? reference : null, charityId: str(r.charityId), donatedAtMs: epochMs(r.donationDate) };
+    return { id, status, thirdPartyReference: reference ? reference : null, charityId: str(r.charityId), donatedAtMs: epochMs(r.donationDate), receiptRef: str(r.donationRef) };
   };
 
   const donationList = (raw: unknown): unknown[] => {
@@ -176,6 +185,22 @@ export function createJustGivingClient(options: { appId: string; apiBase: string
     async pageHasDonation(pagePath, donationId) {
       const raw = await getJson(`/fundraising/pages/${encodePagePath(pagePath)}/donations`);
       return donationList(raw).some((d) => str(record(d).id) === donationId);
+    },
+
+    async getPageDonationIds(pagePath) {
+      const ids: string[] = [];
+      let cursor: string | null = null;
+      for (let page = 0; page < MAX_DONATION_PAGES; page++) {
+        const query = `?pageSize=${DONATION_PAGE_SIZE}${cursor ? `&pageCursor=${encodeURIComponent(cursor)}` : ''}`;
+        const raw = await getJson(`/fundraising/pages/${encodePagePath(pagePath)}/donations${query}`);
+        for (const item of donationList(raw)) {
+          const id = str(record(item).id);
+          if (id) ids.push(id);
+        }
+        cursor = str(record(record(raw).pagination).nextPageCursor);
+        if (!cursor) break;
+      }
+      return ids;
     },
 
     async getPage(pagePath) {
