@@ -140,6 +140,38 @@ describe('refund re-check', () => {
     expect(await recheckDonations(deps, now)).toEqual({ checked: 0, revoked: 0 });
   });
 
+  it('retries a failed role removal on the next recheck', async () => {
+    const { deps, store, discord, tokens } = setup((t) => ({ donations: { '100': donation('100', t.a, 'Refunded', 'C1') } }));
+    store.insertClaim({ donationId: '100', discordUserId: USER_A, token: tokens.a, pageShortName: 'page-one', source: 'claim' });
+    discord.control.removeResult = false;
+
+    expect(await recheckDonations(deps, now)).toEqual({ checked: 1, revoked: 1 });
+    expect(store.getClaim('100')).toMatchObject({ status: 'revoked' });
+    expect(discord.removed).toHaveLength(1);
+
+    discord.control.removeResult = true;
+    expect(await recheckDonations(deps, now)).toEqual({ checked: 0, revoked: 0 });
+    expect(discord.removed).toHaveLength(2);
+    expect(store.getPendingRoleRemovals()).toEqual([]);
+  });
+
+  it('clears a pending removal without removing the role when another donation is granted', async () => {
+    const { deps, store, discord, tokens } = setup((t) => ({ donations: {
+      '100': donation('100', t.a, 'Refunded', 'C1'),
+      '200': donation('200', t.a, 'Accepted', 'C1'),
+    } }));
+    store.insertClaim({ donationId: '100', discordUserId: USER_A, token: tokens.a, pageShortName: 'page-one', source: 'claim' });
+    discord.control.removeResult = false;
+    await recheckDonations(deps, now);
+    expect(store.getPendingRoleRemovals()).toEqual([USER_A]);
+
+    store.insertClaim({ donationId: '200', discordUserId: USER_A, token: tokens.a, pageShortName: 'page-one', source: 'claim' });
+    discord.control.removeResult = true;
+    await recheckDonations(deps, now);
+    expect(discord.removed).toHaveLength(1);
+    expect(store.getPendingRoleRemovals()).toEqual([]);
+  });
+
   it('keeps the role when the member has another valid donation', async () => {
     const donations: Record<string, ReturnType<typeof donation>> = {};
     const { deps, store, discord, tokens } = setup((t) => {
