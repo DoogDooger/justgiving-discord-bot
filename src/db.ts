@@ -44,6 +44,12 @@ export interface Store {
   getGrantedClaims(createdBefore: number): Claim[];
   /** Marks a claim as revoked (refunded or cancelled on JustGiving). It stays claimed, so it can't be reused. */
   revokeClaim(donationId: string): void;
+  /** Queues a role removal to retry after a refund. */
+  queueRoleRemoval(discordUserId: string): void;
+  /** Users whose role removal is still pending. */
+  getPendingRoleRemovals(): string[];
+  /** Clears a completed or cancelled role removal. */
+  deletePendingRoleRemoval(discordUserId: string): void;
   /** Deletes everything stored about a user. Returns how many claims were removed. */
   forgetUser(discordUserId: string): number;
   /** Most recent granted claims from donors who haven't hidden themselves from the donor wall. */
@@ -85,6 +91,10 @@ CREATE TABLE IF NOT EXISTS claims (
   created_at      INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS claims_user ON claims (discord_user_id);
+
+CREATE TABLE IF NOT EXISTS pending_role_removals (
+  discord_user_id TEXT PRIMARY KEY
+);
 
 CREATE TABLE IF NOT EXISTS donor_prefs (
   discord_user_id TEXT PRIMARY KEY,
@@ -142,10 +152,14 @@ export function openStore(path: string): Store {
   );
   const selectGranted = db.prepare<[number], ClaimRow>("SELECT * FROM claims WHERE status = 'granted' AND created_at < ? ORDER BY created_at");
   const revokeClaimStmt = db.prepare("UPDATE claims SET status = 'revoked' WHERE donation_id = ?");
+  const insertPendingRemoval = db.prepare('INSERT OR IGNORE INTO pending_role_removals (discord_user_id) VALUES (?)');
+  const selectPendingRemovals = db.prepare<[], { discord_user_id: string }>('SELECT discord_user_id FROM pending_role_removals');
+  const deletePendingRemoval = db.prepare('DELETE FROM pending_role_removals WHERE discord_user_id = ?');
   const forgetUser = db.transaction((discordUserId: string): number => {
     const claims = db.prepare('DELETE FROM claims WHERE discord_user_id = ?').run(discordUserId).changes;
     db.prepare('DELETE FROM users_tokens WHERE discord_user_id = ?').run(discordUserId);
     db.prepare('DELETE FROM donor_prefs WHERE discord_user_id = ?').run(discordUserId);
+    db.prepare('DELETE FROM pending_role_removals WHERE discord_user_id = ?').run(discordUserId);
     db.prepare('DELETE FROM audit_log WHERE discord_user_id = ?').run(discordUserId);
     return claims;
   });
@@ -196,6 +210,13 @@ export function openStore(path: string): Store {
     getGrantedClaims: (createdBefore) => selectGranted.all(createdBefore).map(toClaim),
     revokeClaim: (donationId) => {
       revokeClaimStmt.run(donationId);
+    },
+    queueRoleRemoval: (discordUserId) => {
+      insertPendingRemoval.run(discordUserId);
+    },
+    getPendingRoleRemovals: () => selectPendingRemovals.all().map((row) => row.discord_user_id),
+    deletePendingRoleRemoval: (discordUserId) => {
+      deletePendingRemoval.run(discordUserId);
     },
     forgetUser,
     getRecentPublicClaims: (limit) => selectRecentPublic.all(limit).map(toClaim),

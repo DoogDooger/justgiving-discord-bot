@@ -138,6 +138,7 @@ const REVERSED = new Set(['Refunded', 'Cancelled', 'Rejected']);
  * donors), and the role is removed if the member has no other donation left. Run daily from
  * index.ts. Paced so a long list doesn't hammer JustGiving; any lookup error just skips that
  * donation until the next run.
+ * Failed role removals stay queued for the next re-check.
  */
 export async function recheckDonations(deps: DonationDeps, options: { minAgeMs: number; pauseMs: number }): Promise<{ checked: number; revoked: number }> {
   const { store, charity } = deps;
@@ -154,14 +155,25 @@ export async function recheckDonations(deps: DonationDeps, options: { minAgeMs: 
       store.revokeClaim(claim.donationId);
       revoked++;
       const stillDonor = store.getClaimsForUser(claim.discordUserId).some((c) => c.status === 'granted');
-      const removed = stillDonor ? false : await deps.discord.removeRole(claim.discordUserId, charity.roleId, `JustGiving donation ${claim.donationId} was ${status.toLowerCase()}`);
+      if (!stillDonor) store.queueRoleRemoval(claim.discordUserId);
       store.audit('claim_revoked', {
         discordUserId: claim.discordUserId,
         donationId: claim.donationId,
-        detail: `${status}; role ${stillDonor ? 'kept (other donations)' : removed ? 'removed' : 'not removed'}`,
+        detail: `${status}; role ${stillDonor ? 'kept (other donations)' : 'removal queued'}`,
       });
     }
     if (options.pauseMs > 0) await new Promise((resolve) => setTimeout(resolve, options.pauseMs));
+  }
+  for (const discordUserId of store.getPendingRoleRemovals()) {
+    const claims = store.getClaimsForUser(discordUserId);
+    // Forgotten since the list was read, or donating again: nothing to remove.
+    if (claims.length === 0 || claims.some((c) => c.status === 'granted')) {
+      store.deletePendingRoleRemoval(discordUserId);
+      continue;
+    }
+    const removed = await deps.discord.removeRole(discordUserId, charity.roleId, 'JustGiving donation refunded, cancelled or rejected');
+    if (removed) store.deletePendingRoleRemoval(discordUserId);
+    store.audit(removed ? 'role_removed' : 'role_remove_failed', { discordUserId });
   }
   return { checked: claims.length, revoked };
 }

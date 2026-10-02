@@ -82,8 +82,8 @@ export function fakeDiscord(result: RoleResult = 'added') {
   const calls: { userId: string; roleId: string }[] = [];
   const dms: string[] = [];
   const removed: { userId: string; roleId: string }[] = [];
-  /** Set to make addRole slow (like Discord's rate-limit queue) or change its result. */
-  const control = { delayMs: 0, result };
+  /** Set to make addRole slow (like Discord's rate-limit queue) or change role results. */
+  const control = { delayMs: 0, result, removeResult: true };
   const actions: DiscordActions = {
     async addRole(userId, roleId) {
       calls.push({ userId, roleId });
@@ -92,7 +92,7 @@ export function fakeDiscord(result: RoleResult = 'added') {
     },
     async removeRole(userId, roleId) {
       removed.push({ userId, roleId });
-      return true;
+      return control.removeResult;
     },
     async sendThanks(userId) {
       dms.push(userId);

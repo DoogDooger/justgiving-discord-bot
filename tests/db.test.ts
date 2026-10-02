@@ -28,4 +28,14 @@ describe('store on disk', () => {
     expect(second.getOrCreateToken('111111111111111111')).toBe(token);
     second.close();
   });
+
+  it('deletes only the forgotten user\'s pending role removal', () => {
+    dir = mkdtempSync(join(tmpdir(), 'donor-bot-'));
+    const store = openStore(join(dir, 'donors.db'));
+    store.queueRoleRemoval('111111111111111111');
+    store.queueRoleRemoval('222222222222222222');
+    store.forgetUser('111111111111111111');
+    expect(store.getPendingRoleRemovals()).toEqual(['222222222222222222']);
+    store.close();
+  });
 });
