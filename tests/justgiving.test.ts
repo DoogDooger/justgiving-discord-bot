@@ -118,6 +118,22 @@ describe('JustGiving client', () => {
     expect(seen).toHaveLength(2);
   });
 
+  it.each([undefined, null, '', '  '])('falls back to online plus offline totals when the grand total is %j', async (grandTotalRaisedExcludingGiftAid) => {
+    const { fn } = fakeFetch({
+      '/fundraising/pages/page/my-page': { body: { grandTotalRaisedExcludingGiftAid, totalRaisedOnline: 100, totalRaisedOffline: 25 } },
+    });
+    const client = createJustGivingClient({ appId: 'APPID', apiBase: 'https://api.test', fetch: fn });
+    expect((await client.getPageTotals('page/my-page')).raised).toBe(125);
+  });
+
+  it.each([0, 150])('keeps an explicit grand total of %s', async (grandTotalRaisedExcludingGiftAid) => {
+    const { fn } = fakeFetch({
+      '/fundraising/pages/page/my-page': { body: { grandTotalRaisedExcludingGiftAid, totalRaisedOnline: 100, totalRaisedOffline: 25 } },
+    });
+    const client = createJustGivingClient({ appId: 'APPID', apiBase: 'https://api.test', fetch: fn });
+    expect((await client.getPageTotals('page/my-page')).raised).toBe(grandTotalRaisedExcludingGiftAid);
+  });
+
   it('looks up page details', async () => {
     const { fn } = fakeFetch({
       '/fundraising/pages/page/my-page': { body: { pageId: '987654', charity: { id: 4321, name: 'Example Charity' } } },

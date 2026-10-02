@@ -204,8 +204,10 @@ export function createJustGivingClient(options: { appId: string; apiBase: string
       const raw = await getJson(`/fundraising/pages/${encodePagePath(pagePath)}`);
       if (raw === null) throw new JustGivingError(`JustGiving page "${pagePath}" was not found`, 404);
       const page = record(raw);
-      const num = (value: unknown) => {
-        const n = Number(str(value));
+      const num = (value: unknown): number | null => {
+        const s = str(value)?.trim();
+        if (!s) return null;
+        const n = Number(s);
         return Number.isFinite(n) ? n : null;
       };
       const raised = num(page.grandTotalRaisedExcludingGiftAid) ?? (num(page.totalRaisedOnline) ?? 0) + (num(page.totalRaisedOffline) ?? 0);
