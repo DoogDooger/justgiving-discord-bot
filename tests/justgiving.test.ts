@@ -41,7 +41,19 @@ describe('JustGiving client', () => {
   it('reads a donation and normalises the ID to a string', async () => {
     const { fn } = fakeFetch({ '/donation/1234': { body: { id: 1234, status: 'Accepted', thirdPartyReference: ' ABCD2345 ', charityId: 4321 } } });
     const client = createJustGivingClient({ appId: 'APPID', apiBase: 'https://api.test', fetch: fn });
-    expect(await client.getDonation('1234')).toEqual({ id: '1234', status: 'Accepted', thirdPartyReference: 'ABCD2345', charityId: '4321' });
+    expect(await client.getDonation('1234')).toEqual({ id: '1234', status: 'Accepted', thirdPartyReference: 'ABCD2345', charityId: '4321', donatedAtMs: null });
+  });
+
+  it.each(['+0000', '+0100', '-0100', ''])('reads the UTC donation timestamp without applying offset %s', async (offset) => {
+    const { fn } = fakeFetch({ '/donation/1234': { body: { id: 1234, status: 'Accepted', donationDate: `/Date(1790904657895${offset})/` } } });
+    const client = createJustGivingClient({ appId: 'APPID', apiBase: 'https://api.test', fetch: fn });
+    expect((await client.getDonation('1234'))?.donatedAtMs).toBe(1790904657895);
+  });
+
+  it.each([undefined, null, 1790904657895, '', '2026-10-01T00:00:00Z', '/Date(123+010)/', `/Date(${'9'.repeat(400)})/`])('reports an unavailable date for unsupported donationDate %j', async (donationDate) => {
+    const { fn } = fakeFetch({ '/donation/1234': { body: { id: 1234, status: 'Accepted', donationDate } } });
+    const client = createJustGivingClient({ appId: 'APPID', apiBase: 'https://api.test', fetch: fn });
+    expect((await client.getDonation('1234'))?.donatedAtMs).toBeNull();
   });
 
   it('returns null for an unknown donation', async () => {

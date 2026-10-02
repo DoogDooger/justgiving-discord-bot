@@ -19,6 +19,7 @@ export interface DonationDeps {
   justGiving: JustGivingApi;
   store: Store;
   charity: CharityConfig;
+  driveEndsAt?: Date | null;
   pages: Pick<PageDirectory, 'getPageOrThrow'>;
   listingRetries?: number;
   retryDelayMs?: number;

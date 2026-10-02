@@ -74,8 +74,8 @@ export function fakeJustGiving(options: FakeJustGivingOptions = {}): JustGivingA
   };
 }
 
-export function donation(id: string, reference: string | null, status = 'Accepted', charityId: string | null = null): Donation {
-  return { id, status, thirdPartyReference: reference, charityId };
+export function donation(id: string, reference: string | null, status = 'Accepted', charityId: string | null = null, donatedAtMs: number | null = null): Donation {
+  return { id, status, thirdPartyReference: reference, charityId, donatedAtMs };
 }
 
 export function fakeDiscord(result: RoleResult = 'added') {
