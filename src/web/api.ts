@@ -121,11 +121,12 @@ export function createWebApi(getContext: () => AppContext): WebApi {
     async getHome() {
       const ctx = getContext();
       const { store } = ctx.donations;
-      const claims = store.getRecentPublicClaims(FEED_SIZE);
-
       // Top donors: public amounts from JustGiving (cached, never stored), matched to the
       // Discord member who claimed each donation. Hidden amounts and hidden donors don't count.
       const amounts = await ctx.pages.getPublicAmounts();
+      // Read associations after the await: a forgotten user must not start a new
+      // profile lookup from an earlier snapshot after their cache was evicted.
+      const claims = store.getRecentPublicClaims(FEED_SIZE);
       const sums = new Map<string, { total: number; donations: number }>();
       for (const owner of store.getPublicClaimOwners()) {
         const amount = amounts.get(owner.donationId);
@@ -145,19 +146,26 @@ export function createWebApi(getContext: () => AppContext): WebApi {
       return {
         totals,
         endsAt: ctx.config.driveEndsAt?.getTime() ?? null,
-        feed: claims.map((c) => {
+        // Provider/profile reads may have overlapped hide, revoke or forget.
+        feed: claims.filter((c) => store.getClaim(c.donationId)?.status === 'granted' &&
+          store.getClaim(c.donationId)?.discordUserId === c.discordUserId && !store.isHiddenFromWall(c.discordUserId)).map((c) => {
           const profile = profiles.get(c.discordUserId)!;
           return { name: profile.name, avatarUrl: profile.avatarUrl, at: c.createdAt };
         }),
-        topDonors: leaders.map(([id, sum]) => {
+        topDonors: leaders.flatMap(([id]) => {
+          if (store.isHiddenFromWall(id)) return [];
+          const publicAmounts = store.getClaimsForUser(id).filter((c) => c.status === 'granted')
+            .flatMap((c) => { const amount = amounts.get(c.donationId); return amount ? [amount] : []; });
+          if (publicAmounts.length === 0) return [];
+          const sum = { total: publicAmounts.reduce((a, b) => a + b, 0), donations: publicAmounts.length };
           const profile = profiles.get(id)!;
-          return {
+          return [{
             name: profile.name,
             avatarUrl: profile.avatarUrl,
             total: Math.round(sum.total * 100) / 100,
             currencySymbol: totals?.currencySymbol ?? '£',
             donations: sum.donations,
-          };
+          }];
         }),
       };
     },

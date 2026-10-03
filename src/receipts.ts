@@ -1,6 +1,11 @@
 import type { CharityConfig } from './config.js';
 import { JustGivingError, type JustGivingApi } from './justgiving.js';
 
+/** Receipt prefix shared by donor input and fresh provider details; never stored as an ownership token. */
+export function receiptReference(input: string): string | null {
+  return /^(\d{1,15})(?:\s*\/\s*\d+)?$/.exec(input.trim())?.[1] ?? null;
+}
+
 /** How many donations are looked up at once while filling the index. */
 const LOOKUPS_AT_ONCE = 4;
 /** After a search that found nothing, don't re-read the page's list again for this long. */
@@ -67,7 +72,8 @@ export class ReceiptDirectory {
         const id = todo[next++]!;
         try {
           const donation = await this.justGiving.getDonation(id);
-          if (donation?.receiptRef) this.byRef.set(donation.receiptRef, id);
+          const ref = donation?.receiptRef ? receiptReference(donation.receiptRef) : null;
+          if (ref) this.byRef.set(ref, id);
           this.seen.add(id);
         } catch (error) {
           // Left out of `seen`, so the next refresh tries this one again.

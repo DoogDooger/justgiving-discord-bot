@@ -1,4 +1,5 @@
 import { Events } from 'discord.js';
+import { ClaimPrompts } from './claim-prompts.js';
 import { loadConfigOrExit } from './config.js';
 import type { AppContext } from './context.js';
 import { openStore } from './db.js';
@@ -8,6 +9,7 @@ import { recheckDonations, syncPendingRoles } from './donations.js';
 import { createJustGivingClient } from './justgiving.js';
 import { PageDirectory } from './pages.js';
 import { ProfileDirectory } from './profiles.js';
+import { UserOperations } from './user-operations.js';
 import { ReceiptDirectory } from './receipts.js';
 import { createWebServer, loadAstroHandler } from './web/server.js';
 
@@ -19,10 +21,12 @@ const receipts = new ReceiptDirectory(justGiving, config.charity);
 const client = createDiscordClient();
 
 const ctx: AppContext = {
+  claimPrompts: new ClaimPrompts(),
   config,
   pages,
   profiles: new ProfileDirectory(client.rest),
   donations: {
+    operations: new UserOperations(),
     justGiving,
     store,
     charity: config.charity,

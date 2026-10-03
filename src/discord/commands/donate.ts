@@ -3,13 +3,14 @@ import {
   ButtonBuilder,
   ButtonStyle,
   MessageFlags,
-  type ButtonInteraction,
   type ChatInputCommandInteraction,
   type InteractionEditReplyOptions,
 } from 'discord.js';
+import type { UserOperation } from '../../user-operations.js';
 import type { AppContext } from '../../context.js';
 import { buildDonateLink, buildExitUrl } from '../../justgiving.js';
 import { donateEmbed, driveEndedEmbed, failureEmbed, notOpenEmbed, wallChoiceEmbed } from '../embeds.js';
+import type { DonationButtonInteraction } from '../interaction-ports.js';
 import { CLAIM_BUTTON_ID } from './claim.js';
 
 /** The two answers to "appear on the donor wall?", asked on every /donate before the link is shown. */
@@ -50,18 +51,27 @@ export async function handleDonate(interaction: ChatInputCommandInteraction, ctx
 }
 
 /** Step 2: the donor answered, so save the choice and swap the question for the donate card. */
-export async function handleWallChoice(interaction: ButtonInteraction, ctx: AppContext, hidden: boolean): Promise<void> {
-  // Building the card can need a JustGiving lookup, so acknowledge the click first.
-  await interaction.deferUpdate();
-  const { store } = ctx.donations;
-  store.setHiddenFromWall(interaction.user.id, hidden);
-  store.audit(hidden ? 'wall_hidden' : 'wall_shown', { discordUserId: interaction.user.id, detail: 'donate' });
-  await interaction.editReply(await donateCard(interaction.user.id, hidden, ctx));
+export async function handleWallChoice(interaction: DonationButtonInteraction, ctx: AppContext, hidden: boolean): Promise<void> {
+  const operation = ctx.donations.operations.begin(interaction.user.id);
+  try {
+    await interaction.deferUpdate();
+    if (!operation.isCurrent()) {
+      await interaction.editReply({ content: 'Your data was unlinked. Run /donate again.', embeds: [], components: [] });
+      return;
+    }
+    const { store } = ctx.donations;
+    store.setHiddenFromWall(interaction.user.id, hidden);
+    store.audit(hidden ? 'wall_hidden' : 'wall_shown', { discordUserId: interaction.user.id, detail: 'donate' });
+    await interaction.editReply(await donateCard(interaction.user.id, hidden, ctx, operation));
+  } finally {
+    operation.finish();
+  }
 }
 
-async function donateCard(discordUserId: string, hidden: boolean, ctx: AppContext): Promise<InteractionEditReplyOptions> {
+async function donateCard(discordUserId: string, hidden: boolean, ctx: AppContext, operation: UserOperation): Promise<InteractionEditReplyOptions> {
   const { charity, site, publicBaseUrl, driveEndsAt } = ctx.config;
   const page = await ctx.pages.getPage();
+  if (!operation.isCurrent()) return { content: 'Your data was unlinked. Run /donate again.', embeds: [], components: [] };
   if (!page) {
     return {
       embeds: [failureEmbed('api_error').setDescription("JustGiving isn't responding right now. Try /donate again in a few minutes.")],

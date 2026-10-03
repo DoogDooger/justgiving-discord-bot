@@ -113,7 +113,9 @@ Astro.response.headers.set('Cache-Control', 'public, max-age=30');
     <p>Donations go straight to {charity} through JustGiving. We never see payment details. Only amounts donors made public on JustGiving appear in the top donors list.</p>
     <p>Rather not appear on the wall? Run <code>/donor-wall hide</code> in Discord.</p>
     <p>
-      To give you the role, we store your Discord ID and your JustGiving donation ID, and nothing else. Run <code>/donor-forget</code> in Discord to delete them.
+      To manage your role, we store your Discord link, donation IDs, personal donation code (if used), wall setting and operational records.
+      <code>/donor-forget</code> removes your user-linked records from the active bot but keeps used donation IDs, without your Discord link, to prevent reuse while donations remain redeemable.
+      You keep the role, but recovery and refund tracking stop. Earlier backups expire separately; already served pages and messages may remain.
     </p>
     {site.festive && <p class="season">Merry Christmas from {site.communityName}</p>}
   </footer>

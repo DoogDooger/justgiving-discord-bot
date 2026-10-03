@@ -2,6 +2,7 @@ import { randomInt } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import Database from 'better-sqlite3';
+import { donationId as canonicalDonationId } from './donation-id.js';
 
 export type ClaimSource = 'redirect' | 'claim';
 export type ClaimStatus = 'granted' | 'revoked';
@@ -12,7 +13,8 @@ export type RoleState = 'pending' | 'added' | 'not_member';
 export interface Claim {
   donationId: string;
   discordUserId: string;
-  token: string;
+  /** Original bot reference; null for a receipt-only donation. */
+  token: string | null;
   pageShortName: string;
   source: ClaimSource;
   status: ClaimStatus;
@@ -34,7 +36,11 @@ export interface Store {
   getOrCreateToken(discordUserId: string): string;
   getTokenOwner(token: string): string | null;
   getClaim(donationId: string): Claim | null;
-  /** Returns false if the donation has already been claimed. */
+  /** True even after its Discord association was forgotten. */
+  hasRedeemedDonation(donationId: string): boolean;
+  /** Changes on visibility/forget operations so rendered public caches can be invalidated. */
+  getPrivacyRevision(): number;
+  /** Atomically reserves the used marker and claim; false if already redeemed. */
   insertClaim(claim: Omit<Claim, 'createdAt' | 'status' | 'roleState'>): boolean;
   setRoleState(donationId: string, state: RoleState): void;
   /** Granted claims still waiting for their role, oldest first (for the background role queue). */
@@ -50,7 +56,7 @@ export interface Store {
   getPendingRoleRemovals(): string[];
   /** Clears a completed or cancelled role removal. */
   deletePendingRoleRemoval(discordUserId: string): void;
-  /** Deletes everything stored about a user. Returns how many claims were removed. */
+  /** Deletes user-linked data, retaining donation-only used markers. Returns removed claim count. */
   forgetUser(discordUserId: string): number;
   /** Most recent granted claims from donors who haven't hidden themselves from the donor wall. */
   getRecentPublicClaims(limit: number): Claim[];
@@ -73,6 +79,17 @@ function generateToken(): string {
   return token;
 }
 
+const CLAIM_COLUMNS = `(
+  donation_id     TEXT PRIMARY KEY,
+  discord_user_id TEXT NOT NULL,
+  token           TEXT,
+  page_short_name TEXT NOT NULL,
+  source          TEXT NOT NULL CHECK (source IN ('redirect', 'claim')),
+  status          TEXT NOT NULL CHECK (status IN ('granted', 'revoked')),
+  role_state      TEXT NOT NULL DEFAULT 'pending' CHECK (role_state IN ('pending', 'added', 'not_member')),
+  created_at      INTEGER NOT NULL
+)`;
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users_tokens (
   token           TEXT PRIMARY KEY,
@@ -80,17 +97,12 @@ CREATE TABLE IF NOT EXISTS users_tokens (
   created_at      INTEGER NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS claims (
-  donation_id     TEXT PRIMARY KEY,
-  discord_user_id TEXT NOT NULL,
-  token           TEXT NOT NULL,
-  page_short_name TEXT NOT NULL,
-  source          TEXT NOT NULL CHECK (source IN ('redirect', 'claim')),
-  status          TEXT NOT NULL CHECK (status IN ('granted', 'revoked')),
-  role_state      TEXT NOT NULL DEFAULT 'pending' CHECK (role_state IN ('pending', 'added', 'not_member')),
-  created_at      INTEGER NOT NULL
-);
+CREATE TABLE IF NOT EXISTS claims ${CLAIM_COLUMNS};
 CREATE INDEX IF NOT EXISTS claims_user ON claims (discord_user_id);
+
+CREATE TABLE IF NOT EXISTS redeemed_donations (
+  donation_id TEXT PRIMARY KEY
+);
 
 CREATE TABLE IF NOT EXISTS pending_role_removals (
   discord_user_id TEXT PRIMARY KEY
@@ -115,7 +127,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
 interface ClaimRow {
   donation_id: string;
   discord_user_id: string;
-  token: string;
+  token: string | null;
   page_short_name: string;
   source: ClaimSource;
   status: ClaimStatus;
@@ -134,12 +146,41 @@ const toClaim = (row: ClaimRow): Claim => ({
   createdAt: row.created_at,
 });
 
+/** Open storage and transactionally migrate legacy claims before accepting requests. */
 export function openStore(path: string): Store {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
   const db = new Database(path);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
-  db.exec(SCHEMA);
+  try {
+    db.transaction(() => {
+      const version = db.pragma('user_version', { simple: true });
+      if (typeof version !== 'number' || version > 1) throw new Error('Unsupported donations database version');
+      db.exec(SCHEMA);
+      if (version === 0) {
+        // Rebuild: CREATE IF NOT EXISTS cannot remove the legacy token NOT NULL constraint.
+        // Canonical-ID collisions abort the whole migration rather than silently choosing an owner.
+        db.exec(`
+          CREATE TABLE claims_receipt_migration ${CLAIM_COLUMNS};
+          INSERT INTO claims_receipt_migration
+          SELECT CASE WHEN length(donation_id) BETWEEN 1 AND 15 AND donation_id NOT GLOB '*[^0-9]*'
+                      THEN CAST(CAST(donation_id AS INTEGER) AS TEXT) ELSE donation_id END,
+                 discord_user_id, token, page_short_name, source, status, role_state, created_at
+          FROM claims;
+          DROP TABLE claims;
+          ALTER TABLE claims_receipt_migration RENAME TO claims;
+          CREATE INDEX claims_user ON claims(discord_user_id);
+          PRAGMA user_version = 1;
+        `);
+      }
+      // Includes revoked claims; never reconstruct previously forgotten associations.
+      db.exec('INSERT OR IGNORE INTO redeemed_donations SELECT donation_id FROM claims');
+    })();
+  } catch (error) {
+    db.close();
+    throw error;
+  }
+  let privacyRevision = 0;
 
   const selectTokenForUser = db.prepare<[string], { token: string }>('SELECT token FROM users_tokens WHERE discord_user_id = ?');
   const selectTokenOwner = db.prepare<[string], { discord_user_id: string }>('SELECT discord_user_id FROM users_tokens WHERE token = ?');
@@ -147,9 +188,19 @@ export function openStore(path: string): Store {
   const selectClaim = db.prepare<[string], ClaimRow>('SELECT * FROM claims WHERE donation_id = ?');
   const selectClaimsForUser = db.prepare<[string], ClaimRow>('SELECT * FROM claims WHERE discord_user_id = ? ORDER BY created_at');
   const insertClaimStmt = db.prepare(
-    `INSERT OR IGNORE INTO claims (donation_id, discord_user_id, token, page_short_name, source, status, role_state, created_at)
+    `INSERT INTO claims (donation_id, discord_user_id, token, page_short_name, source, status, role_state, created_at)
      VALUES (@donationId, @discordUserId, @token, @pageShortName, @source, 'granted', 'pending', @createdAt)`,
   );
+  const reserveDonation = db.prepare('INSERT INTO redeemed_donations(donation_id) VALUES (?) ON CONFLICT(donation_id) DO NOTHING');
+  const selectRedeemed = db.prepare<[string], { donation_id: string }>('SELECT donation_id FROM redeemed_donations WHERE donation_id = ?');
+  const insertClaim = db.transaction((claim: Omit<Claim, 'createdAt' | 'status' | 'roleState'>): boolean => {
+    const id = canonicalDonationId(claim.donationId);
+    if (id === null) throw new Error('Invalid donation ID passed to claim storage');
+    if (reserveDonation.run(id).changes === 0) return false;
+    // Any failure rolls back the marker too; do not suppress constraint failures.
+    insertClaimStmt.run({ ...claim, donationId: id, createdAt: Date.now() });
+    return true;
+  });
   const selectGranted = db.prepare<[number], ClaimRow>("SELECT * FROM claims WHERE status = 'granted' AND created_at < ? ORDER BY created_at");
   const revokeClaimStmt = db.prepare("UPDATE claims SET status = 'revoked' WHERE donation_id = ?");
   const insertPendingRemoval = db.prepare('INSERT OR IGNORE INTO pending_role_removals (discord_user_id) VALUES (?)');
@@ -198,10 +249,12 @@ export function openStore(path: string): Store {
     getOrCreateToken,
     getTokenOwner: (token) => selectTokenOwner.get(token)?.discord_user_id ?? null,
     getClaim: (donationId) => {
-      const row = selectClaim.get(donationId);
+      const row = selectClaim.get(canonicalDonationId(donationId) ?? donationId);
       return row ? toClaim(row) : null;
     },
-    insertClaim: (claim) => insertClaimStmt.run({ ...claim, createdAt: Date.now() }).changes === 1,
+    hasRedeemedDonation: (donationId) => Boolean(selectRedeemed.get(canonicalDonationId(donationId) ?? donationId)),
+    getPrivacyRevision: () => privacyRevision,
+    insertClaim,
     setRoleState: (donationId, state) => {
       updateRoleState.run(state, donationId);
     },
@@ -218,12 +271,17 @@ export function openStore(path: string): Store {
     deletePendingRoleRemoval: (discordUserId) => {
       deletePendingRemoval.run(discordUserId);
     },
-    forgetUser,
+    forgetUser: (discordUserId) => {
+      const removed = forgetUser(discordUserId);
+      privacyRevision++;
+      return removed;
+    },
     getRecentPublicClaims: (limit) => selectRecentPublic.all(limit).map(toClaim),
     getPublicClaimOwners: () => selectPublicOwners.all(),
     isHiddenFromWall: (discordUserId) => (selectHidden.get(discordUserId)?.hidden_from_wall ?? 0) === 1,
     setHiddenFromWall: (discordUserId, hidden) => {
       upsertHidden.run(discordUserId, hidden ? 1 : 0, Date.now());
+      privacyRevision++;
     },
     audit: (event, entry = {}) => {
       insertAudit.run(event, entry.discordUserId ?? null, entry.donationId ?? null, entry.detail ?? null, Date.now());

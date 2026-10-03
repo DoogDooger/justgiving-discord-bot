@@ -17,10 +17,10 @@ Other commands:
 
 | Command | What it does |
 |---|---|
-| `/claim` | Links a donation if the automatic step didn't happen (closed tab, slow connection). The member enters the reference from their JustGiving receipt email (it looks like `123456789/1`). There's also an **I've already donated** button under `/donate`. |
-| `/donor-status` | Shows how many donations a member has linked, and adds the role back if it's missing. |
+| `/claim` | Links an eligible donation, including one made directly to the fundraising page or before the bot launched. Every attempt first asks Show/Hide for the donor wall, then opens a form for the reference from their JustGiving receipt email (it looks like `123456789/1`). There's also an **I've already donated** button under `/donate`. |
+| `/donor-status` | Shows linked donations; if the role is missing, asks Show/Hide before restoring it. |
 | `/donor-wall` | Shows or hides the member on the donor wall. |
-| `/donor-forget` | Deletes everything the bot stores about the member, after a confirmation. |
+| `/donor-forget` | Deletes user-linked data after confirmation; retains used donation IDs without the Discord link to prevent reuse. The role stays, but recovery and refund tracking stop. |
 
 The **website** (your bot's home page) shows the total raised, progress towards your JustGiving target, days left, the top three donors and a wall of recent donors with their Discord names and pictures.
 
@@ -29,11 +29,24 @@ The **website** (your bot's home page) shows the total raised, progress towards 
 A donation only earns the role if **all** of these are true:
 
 1. JustGiving confirms it exists and its status is **Accepted**.
-2. It was made with a personal link from `/donate`, belonging to the member getting the role.
-3. JustGiving says it went to the charity your page raises money for.
-4. It hasn't been claimed before. One donation, one Discord account.
+2. Its bot-link reference belongs to the member, **or** it has no bot reference and the member supplies a matching receipt reference.
+3. Donations with a bot-link reference retain the charity/page checks. Receipt claims without one must be listed on the **exact configured page**.
+4. It has never been redeemed, including before `/donor-forget`. One donation, one redemption.
+5. After the drive closes, its recorded donation date must be before the cutoff.
 
-There's no minimum amount beyond JustGiving's own (£2 in the UK). Once a day the bot re-checks claimed donations and removes the role for any that were refunded.
+There's no minimum amount beyond JustGiving's own (£2 in the UK). Once a day the bot re-checks linked donations and removes the role after a reversal only if the member has no other granted donation.
+
+### Receipt-only claims
+
+Members who donated directly to the configured page, including before the bot launched, can use `/claim`: **Show/Hide → receipt reference → eligible one-time claim**. The bot resolves the receipt to the JustGiving donation ID; members do not need to find that ID. Every attempt asks again. The choice immediately affects all the member's linked donations, even if the form is cancelled or verification fails.
+
+A non-empty bot-link reference still belongs only to its known owner; receipts cannot override it. The legacy numeric donation-ID fallback retains its existing tagged-owner requirement. No ownership token is fabricated or attached retroactively.
+
+This is **first-claimant redemption, not payer authentication**: receipt possession does not prove who paid. Someone with another person's receipt may claim first. The wall displays the claimant's Discord identity. Linking an old donation does not add money to fundraising totals; feed times mean **linked**, not donated.
+
+Receipt indexing uses the cursor-paginated page list (up to 100 pages of 100 donations), with four detail lookups at a time. Provider delays, unavailable receipt fields and the existing in-memory index can prevent lookup; restarting rebuilds it. New receipt-only claims compare fresh details and confirm current page membership, not just the cached receipt match.
+
+Storage migrates transactionally to nullable claim tokens and donation-only used markers, seeded from existing granted and revoked claims. Canonical donation IDs prevent aliases from bypassing deduplication. A persisted claim stays consumed if Discord is unavailable, allowing the existing role queue to retry. See [Receipt-redemption upgrades and restores](#receipt-redemption-upgrades-and-restores) before upgrading or restoring; older versions do not enforce this policy.
 
 ---
 
@@ -206,28 +219,40 @@ The repository includes a GitHub Actions workflow that deploys whenever you push
 
 If you add or change a slash command, run `npm run register-commands` after the deploy.
 
+### Receipt-redemption upgrades and restores
+
+On startup, receipt redemption migrates SQLite to schema version 1: claim tokens can be null, and `redeemed_donations` retains used donation IDs independently of Discord associations. Existing granted and revoked claims seed the markers. Numeric ID aliases are normalised; conflicting aliases stop startup and roll back the migration for operator review rather than silently selecting an owner. Previously forgotten associations are not reconstructed.
+
+Take a verified SQLite online snapshot before upgrading. Do not copy only the live database file while it uses WAL. Older versions ignore redemption markers and may assume every claim has a token: prefer a forward fix rather than rolling back to them.
+
+Before restoring, stop the single bot, preserve the current volume and restore a verified snapshot into an empty replacement volume with the correct application ownership. Never overwrite an active database or leave stale WAL/SHM files beside a restored one. Check SQLite integrity and application behaviour before resuming. An older snapshot can lose used markers or restore forgotten Discord associations; keep claims closed until both effects are reviewed and reconciled. Do not reconstruct forgotten identities from backups merely to seed markers. No exactly-once guarantee survives arbitrary rollback or data loss.
+
+Backup retention is a separate operator decision: restrict access and disclose how long backups retain records later removed by `/donor-forget`. This change does not activate backups or set their retention.
+
 ### Troubleshooting
 
 - **`check-config` says the bot's role must be above the donor role:** drag the bot's role higher in **Server Settings → Roles**.
 - **The commands don't appear in Discord:** run `npm run register-commands`, then press Ctrl+R in Discord.
 - **`/donate` says donations aren't open yet:** `CHARITY_PAGE` is empty or wrong. `npm run check-config` tells you which.
 - **"We couldn't match this donation to our charity":** JustGiving can take a few seconds to list a new donation. The bot retries for about ten seconds; after that, the donor can press **Try again** on the page or **I've already donated** in Discord.
-- **"Your role is on its way" but no role yet:** normal when many people donate at once. Discord limits how fast roles can be added, so the bot works through a queue. `/donor-status` adds the role straight away.
-- **A member donated without using `/donate`:** the bot can't tell which Discord account made that donation. Give them the role by hand.
+- **"Your role is on its way" but no role yet:** normal when many people donate at once. Discord limits how fast roles can be added, so the bot works through a queue. `/donor-status` offers to restore the role after a fresh Show/Hide choice.
+- **A member donated without using `/donate`:** ask them to use `/claim` with the reference from their JustGiving receipt. An eligible donation without a bot-link reference can be redeemed once if it is listed on the configured page. This is first-claimant redemption, not proof of who paid.
 - **The bot answers twice, or oddly:** two copies are running with the same token, for example one on your computer and one on Fly. Stop one of them.
 
 ---
 
 ## Privacy
 
-The bot stores, in a database on your Fly volume:
+The bot stores, in SQLite on its persistent volume:
 
-- Discord user IDs, each with a personal donation code.
+- Discord user IDs and personal donation codes where a bot link was used.
 - The JustGiving donation IDs each member has linked.
 - Whether a member has hidden themselves from the donor wall.
 - A log of what the bot did (roles given, checks failed).
 
-It does **not** store names, emails, addresses, payment details or donation amounts. The top donors list reads public amounts from JustGiving and keeps them in memory for five minutes; donors who hid their amount on JustGiving aren't ranked. `/donor-forget` deletes everything the bot holds about a member.
+The database does **not** store names, emails, addresses, payment details or donation amounts. Discord display names and avatars are cached in memory for the wall and evicted on forgetting. The top donors list reads public amounts from JustGiving and keeps them in memory for five minutes; donors who hid their amount on JustGiving aren't ranked. `/donor-forget` removes user-linked claims, personal tokens, preferences, pending removals and user audit from the active database. It invalidates pending claims and clears cached Discord profiles. It retains only each used donation ID in a separate redemption table, without a Discord ID, token, receipt reference, amount or timestamp. Donation IDs may still be indirectly identifying; these markers are not described as anonymous. They remain while those donations can be redeemed: the drive's donation cutoff is not a claim expiry. There is no automatic marker expiry. Review retention when permanently ending redemption.
+
+Forgetting keeps the existing role but ends role recovery and future refund tracking for that member. The same donation cannot be redeemed again; a new donation can qualify. `/donor-wall hide` is the alternative when only public visibility should change. Already dispatched Discord requests, served pages and messages cannot be recalled. Server wall caches are invalidated on hide/forget; browser/proxy copies may remain for their cache lifetime (30 seconds), and open pages refresh every minute. Earlier backups retain records until their separately approved expiry.
 
 You are responsible for the data your copy of the bot holds. Tell your members what it stores; the website's footer does this by default.
 

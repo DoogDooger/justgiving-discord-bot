@@ -1,12 +1,14 @@
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
+import { ClaimPrompts } from '../src/claim-prompts.js';
 import type { Config } from '../src/config.js';
 import type { AppContext } from '../src/context.js';
+import { processClaim } from '../src/donations.js';
 import { PageDirectory } from '../src/pages.js';
 import { createWebApi, isDecember, readableOn } from '../src/web/api.js';
 import { createWebServer, type AstroHandler } from '../src/web/server.js';
-import { USER_A, USER_B, charity, donation, setup, site } from './helpers.js';
+import { USER_A, USER_B, charity, deferred, donation, setup, site } from './helpers.js';
 
 const config: Config = {
   discordToken: 'x',
@@ -24,13 +26,14 @@ const config: Config = {
 };
 
 const profiles = {
+  forget: () => undefined,
   async getMany(ids: string[]) {
     return new Map(ids.map((id) => [id, { name: `User ${id.slice(0, 3)}`, avatarUrl: 'https://cdn.discordapp.com/embed/avatars/0.png' }]));
   },
 };
 
 function context(deps: ReturnType<typeof setup>['deps']): AppContext {
-  return { config, donations: deps, pages: new PageDirectory(deps.justGiving, charity), profiles };
+  return { claimPrompts: new ClaimPrompts(), config, donations: deps, pages: new PageDirectory(deps.justGiving, charity), profiles };
 }
 
 describe('web API: JustGiving return', () => {
@@ -126,6 +129,67 @@ describe('web API: site settings', () => {
 });
 
 describe('web API: top donors', () => {
+  it('links old receipt donations without changing page totals; respects visibility and forget', async () => {
+    const { deps, store } = setup(() => ({
+      donations: { '100': donation('100', null, 'Accepted', 'C1', Date.UTC(2020, 0, 1), '700100') },
+      pages: { 'page-one': ['100'] }, amounts: { 'page-one': { '100': 25 } },
+    }));
+    const ctx = context(deps);
+    const api = createWebApi(() => ctx);
+    const before = await api.getHome();
+    store.setHiddenFromWall(USER_A, true);
+    expect(await processClaim('700100/1', USER_A, deps)).toMatchObject({ ok: true });
+    expect((await api.getHome()).feed).toEqual([]);
+    store.setHiddenFromWall(USER_A, false);
+    const shown = await api.getHome();
+    expect(shown.feed).toHaveLength(1);
+    expect(shown.feed[0]?.at).toBe(store.getClaim('100')?.createdAt);
+    expect(shown.topDonors[0]).toMatchObject({ total: 25, donations: 1 });
+    expect(shown.totals).toEqual(before.totals);
+    store.forgetUser(USER_A);
+    const forgotten = await api.getHome();
+    expect(forgotten.feed).toEqual([]);
+    expect(forgotten.topDonors).toEqual([]);
+    expect(forgotten.totals).toEqual(before.totals);
+  });
+
+  it('does not start a new forgotten-profile lookup after an earlier amounts request completes', async () => {
+    const { deps, store, tokens } = setup();
+    store.insertClaim({ donationId: '100', discordUserId: USER_A, token: tokens.a, pageShortName: 'page-one', source: 'claim' });
+    const started = deferred<void>();
+    const result = deferred<Map<string, number>>();
+    const ctx = context(deps);
+    ctx.pages = new PageDirectory({ ...deps.justGiving, getPublicDonationAmounts: async () => {
+      started.resolve(undefined);
+      return result.promise;
+    } }, charity);
+    const profileIds: string[] = [];
+    ctx.profiles = { forget: () => undefined, getMany: async (ids) => {
+      profileIds.push(...ids);
+      return new Map(ids.map((id) => [id, { name: 'Fixture', avatarUrl: 'https://example.test/avatar' }]));
+    } };
+    const home = createWebApi(() => ctx).getHome();
+    await started.promise;
+    store.forgetUser(USER_A);
+    result.resolve(new Map([['100', 25]]));
+    expect(await home).toMatchObject({ feed: [], topDonors: [] });
+    expect(profileIds).toEqual([]);
+  });
+
+  it('does not return forgotten identities when profile lookup was already pending', async () => {
+    const { deps, store, tokens } = setup(() => ({ amounts: { 'page-one': { '100': 25 } } }));
+    store.insertClaim({ donationId: '100', discordUserId: USER_A, token: tokens.a, pageShortName: 'page-one', source: 'claim' });
+    const ctx = context(deps);
+    const started = deferred<void>();
+    const result = deferred<Map<string, { name: string; avatarUrl: string }>>();
+    ctx.profiles = { forget: () => undefined, getMany: async () => { started.resolve(undefined); return result.promise; } };
+    const home = createWebApi(() => ctx).getHome();
+    await started.promise;
+    store.forgetUser(USER_A);
+    result.resolve(new Map([[USER_A, { name: 'Forgotten', avatarUrl: 'https://example.test/avatar' }]]));
+    expect(await home).toMatchObject({ feed: [], topDonors: [] });
+  });
+
   it('ranks by public JustGiving amounts, skipping hidden amounts and hidden donors', async () => {
     const { deps, store, tokens } = setup(() => ({
       // Donation 3 has no public amount (hidden on JustGiving), so it doesn't count.
@@ -158,8 +222,7 @@ describe('web API: top donors', () => {
 let close: (() => void) | undefined;
 afterEach(() => close?.());
 
-async function start(astro: AstroHandler) {
-  const { deps } = setup();
+async function start(astro: AstroHandler, deps: ReturnType<typeof setup>['deps'] = setup().deps) {
   const server = createWebServer(() => context(deps), astro).listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   close = () => server.close();
@@ -167,6 +230,19 @@ async function start(astro: AstroHandler) {
 }
 
 describe('web server', () => {
+  it('invalidates an already rendered home page on hide and forget', async () => {
+    const { deps, store, tokens } = setup();
+    store.insertClaim({ donationId: '100', discordUserId: USER_A, token: tokens.a, pageShortName: 'page-one', source: 'claim' });
+    const url = await start(async (_req, res, _next, locals) => { res.json((await locals.web.getHome()).feed); }, deps);
+    expect(await (await fetch(url)).json()).toHaveLength(1);
+    store.setHiddenFromWall(USER_A, true);
+    expect(await (await fetch(url)).json()).toEqual([]);
+    store.setHiddenFromWall(USER_A, false);
+    expect(await (await fetch(url)).json()).toHaveLength(1);
+    store.forgetUser(USER_A);
+    expect(await (await fetch(url)).json()).toEqual([]);
+  });
+
   it('serves a health check and security headers', async () => {
     const url = await start((_req, _res, next) => next());
     const res = await fetch(`${url}/health`);

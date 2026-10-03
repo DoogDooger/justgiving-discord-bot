@@ -3,6 +3,7 @@
  * data, without logging in to Discord or calling JustGiving. For design work
  * while the live bot is running (two copies of the real bot must never run at once).
  */
+import { ClaimPrompts } from './claim-prompts.js';
 import { DEFAULT_ACCENT_COLOR, DEFAULT_REWARD_TEXT, settingsFromEnvironment, type Config } from './config.js';
 import type { AppContext } from './context.js';
 import { openStore } from './db.js';
@@ -10,6 +11,7 @@ import type { DiscordActions } from './donations.js';
 import type { JustGivingApi } from './justgiving.js';
 import { PageDirectory } from './pages.js';
 import { defaultAvatarUrl } from './profiles.js';
+import { UserOperations } from './user-operations.js';
 import { ReceiptDirectory } from './receipts.js';
 import { createWebServer, loadAstroHandler } from './web/server.js';
 
@@ -78,10 +80,12 @@ const pages = new PageDirectory(justGiving, charity);
 const discord: DiscordActions = { addRole: async () => 'added', removeRole: async () => true, sendThanks: async () => undefined };
 
 const ctx: AppContext = {
+  claimPrompts: new ClaimPrompts(),
   config,
   pages,
-  donations: { justGiving, store, charity, pages, receipts: new ReceiptDirectory(justGiving, charity), discord, sendDmOnSuccess: false },
+  donations: { operations: new UserOperations(), justGiving, store, charity, pages, receipts: new ReceiptDirectory(justGiving, charity), discord, sendDmOnSuccess: false },
   profiles: {
+    forget: () => undefined,
     getMany: async (ids) => new Map(ids.map((id) => [id, { name: names[users.indexOf(id)] ?? 'Donor', avatarUrl: defaultAvatarUrl(id) }])),
   },
 };

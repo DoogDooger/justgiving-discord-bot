@@ -82,18 +82,20 @@ export function createWebServer(getContext: () => AppContext, astro: AstroHandle
   // The home page is the same for everyone and refreshes itself each minute, so render it
   // once and reuse the HTML for a few seconds. Without this, a burst of visitors makes Astro
   // render (and hold in memory) one copy per request.
-  let home: { at: number; body: Buffer; type: string } | null = null;
+  let home: { at: number; revision: number; body: Buffer; type: string } | null = null;
   let rendering: Promise<void> | null = null;
   app.get('/', async (req, res, next) => {
     const sendCached = () => {
       res.set({ 'Content-Type': home!.type, 'Cache-Control': 'public, max-age=30' }).send(home!.body);
     };
-    if (home && Date.now() - home.at < HOME_PAGE_TTL_MS) return sendCached();
+    const revision = () => getContext().donations.store.getPrivacyRevision();
+    if (home && home.revision === revision() && Date.now() - home.at < HOME_PAGE_TTL_MS) return sendCached();
     // Only one render at a time; everyone else waits for it and gets the same copy.
     if (rendering) {
       await rendering.catch(() => undefined);
-      if (home) return sendCached();
+      if (home && home.revision === revision()) return sendCached();
     }
+    const renderRevision = revision();
     const chunks: Buffer[] = [];
     const write = res.write.bind(res);
     const end = res.end.bind(res);
@@ -105,8 +107,8 @@ export function createWebServer(getContext: () => AppContext, astro: AstroHandle
     }) as typeof res.write;
     res.end = ((chunk?: unknown, ...args: unknown[]) => {
       if (chunk && typeof chunk !== 'function') chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string));
-      if (res.statusCode === 200) {
-        home = { at: Date.now(), body: Buffer.concat(chunks), type: String(res.getHeader('content-type') ?? 'text/html; charset=utf-8') };
+      if (res.statusCode === 200 && renderRevision === revision()) {
+        home = { at: Date.now(), revision: renderRevision, body: Buffer.concat(chunks), type: String(res.getHeader('content-type') ?? 'text/html; charset=utf-8') };
       }
       rendering = null;
       finish();

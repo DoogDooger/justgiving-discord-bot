@@ -220,8 +220,9 @@ describe('forgetting a user', () => {
     expect(store.getClaimsForUser(USER_B)).toHaveLength(1);
     expect(store.getTokenOwner(tokens.b)).toBe(USER_B);
 
-    // Their old donation can't be claimed by anyone afterwards: its code no longer maps to a user.
-    expect(await verifyDonation({ source: 'claim', donationId: '100', discordUserId: USER_A }, deps)).toMatchObject({ ok: false, reason: 'reference_mismatch' });
+    // The durable marker blocks reuse without retaining their Discord association.
+    expect(store.hasRedeemedDonation('100')).toBe(true);
+    expect(await verifyDonation({ source: 'claim', donationId: '100', discordUserId: USER_A }, deps)).toMatchObject({ ok: false, reason: 'already_claimed' });
   });
 });
 

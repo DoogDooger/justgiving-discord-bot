@@ -27,7 +27,7 @@ function timeAgo(at: number): string {
   items.length === 0 ? (
     <div class="empty">
       <p class="empty-title">Be the first on the wall</p>
-      <p class="muted">Donate through our Discord and your name and picture will appear here.</p>
+      <p class="muted">Link a donation in Discord and choose Show to appear here.</p>
     </div>
   ) : (
     <ol class="feed">
@@ -36,7 +36,7 @@ function timeAgo(at: number): string {
           <img class="avatar" src={item.avatarUrl} alt="" width="48" height="48" loading="lazy" decoding="async" referrerpolicy="no-referrer" />
           <div class="who">
             <span class="name">{item.name}</span>
-            <span class="what muted">donated to {charityName}</span>
+            <span class="what muted">linked a donation to {charityName}</span>
           </div>
           <time class="when muted" datetime={new Date(item.at).toISOString()}>
             {timeAgo(item.at)}

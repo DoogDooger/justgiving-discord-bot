@@ -84,6 +84,7 @@ export function wallChoiceEmbed(site: SiteConfig, wallUrl: string): EmbedBuilder
         'Donors are shown there with their **Discord name and picture**. The three biggest givers are also listed with their total, but only if the amount is public on JustGiving.',
         '',
         'Your donation counts and you get the role **either way**.',
+        'This choice updates **all your linked donations**, now and in future, immediately—even if you cancel the form. Change it any time with /donor-wall.',
       ].join('\n'),
     )
     .setFooter({ text: 'Pick one to get your donation link.' });
@@ -157,7 +158,7 @@ export function statusEmbed(site: SiteConfig, charity: CharityConfig, row: Statu
   const stateText = { active: '✅ role active', restored: '✅ role added back', failed: "⚠️ couldn't add the role, try again in a minute" };
   return embed
     .setDescription(`**${charity.name}** ${role(charity)}\n${row.donations} donation${row.donations === 1 ? '' : 's'} · ${stateText[row.state]}`)
-    .setFooter({ text: 'Missing a role? Running /donor-status adds it back.' });
+    .setFooter({ text: 'Missing a role? Run /donor-status, then choose Show or Hide to restore it.' });
 }
 
 /**

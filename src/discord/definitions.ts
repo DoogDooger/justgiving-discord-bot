@@ -7,15 +7,8 @@ export const commandDefinitions = [
     .setContexts(InteractionContextType.Guild),
   new SlashCommandBuilder()
     .setName('claim')
-    .setDescription("Link a donation you've already made (if the role wasn't added automatically)")
-    .setContexts(InteractionContextType.Guild)
-    .addStringOption((option) =>
-      option
-        .setName('donation_id')
-        .setDescription('The reference on your JustGiving receipt email, e.g. 123456789/1')
-        .setRequired(true)
-        .setMaxLength(20),
-    ),
+    .setDescription('Choose donor wall visibility, then link a donation using your receipt reference')
+    .setContexts(InteractionContextType.Guild),
   new SlashCommandBuilder()
     .setName('donor-wall')
     .setDescription('Show or hide your name on the public donor wall')
@@ -28,7 +21,7 @@ export const commandDefinitions = [
     ),
   new SlashCommandBuilder()
     .setName('donor-forget')
-    .setDescription('Delete everything this bot stores about you')
+    .setDescription('Delete your Discord donation links; used donation IDs remain to prevent reuse')
     .setContexts(InteractionContextType.Guild),
   new SlashCommandBuilder()
     .setName('donor-status')

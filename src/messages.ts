@@ -35,8 +35,8 @@ export function failureMessage(reason: FailureReason): { title: string; text: st
       };
     case 'missing_reference':
       return {
-        title: "This donation wasn't made through /donate",
-        text: "We can only match donations made with your personal link from /donate. Next time, run /donate first. If you need help, ask a moderator.",
+        title: 'A receipt reference is needed',
+        text: 'Run /claim, choose Show or Hide, then enter the reference from your JustGiving receipt email. Direct donations must be listed on our configured page.',
       };
     case 'reference_mismatch':
       return {
@@ -68,6 +68,8 @@ export function failureMessage(reason: FailureReason): { title: string; text: st
         title: "We couldn't match this donation to our charity",
         text: "It doesn't match our JustGiving page yet. If you've only just donated, wait a minute and try /claim again.",
       };
+    case 'claim_cancelled':
+      return { title: 'This claim was cancelled', text: 'Your data was unlinked while this request was running. Run /claim for a fresh attempt. Donations already redeemed cannot be reused.' };
     case 'api_error':
       return {
         title: "We couldn't reach JustGiving",
