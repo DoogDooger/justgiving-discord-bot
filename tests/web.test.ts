@@ -1,6 +1,7 @@
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
+import { ClaimPrompts } from '../src/claim-prompts.js';
 import type { Config } from '../src/config.js';
 import type { AppContext } from '../src/context.js';
 import { PageDirectory } from '../src/pages.js';
@@ -30,7 +31,7 @@ const profiles = {
 };
 
 function context(deps: ReturnType<typeof setup>['deps']): AppContext {
-  return { config, donations: deps, pages: new PageDirectory(deps.justGiving, charity), profiles };
+  return { claimPrompts: new ClaimPrompts(), config, donations: deps, pages: new PageDirectory(deps.justGiving, charity), profiles };
 }
 
 describe('web API: JustGiving return', () => {

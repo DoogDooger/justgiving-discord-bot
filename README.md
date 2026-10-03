@@ -17,8 +17,8 @@ Other commands:
 
 | Command | What it does |
 |---|---|
-| `/claim` | Links a donation if the automatic step didn't happen (closed tab, slow connection). The member enters the reference from their JustGiving receipt email (it looks like `123456789/1`). There's also an **I've already donated** button under `/donate`. |
-| `/donor-status` | Shows how many donations a member has linked, and adds the role back if it's missing. |
+| `/claim` | Links a donation if the automatic step didn't happen (closed tab, slow connection). Every attempt first asks Show/Hide for the donor wall, then opens a form for the reference from their JustGiving receipt email (it looks like `123456789/1`). There's also an **I've already donated** button under `/donate`. |
+| `/donor-status` | Shows linked donations; if the role is missing, asks Show/Hide before restoring it. |
 | `/donor-wall` | Shows or hides the member on the donor wall. |
 | `/donor-forget` | Deletes everything the bot stores about the member, after a confirmation. |
 
@@ -212,7 +212,7 @@ If you add or change a slash command, run `npm run register-commands` after the 
 - **The commands don't appear in Discord:** run `npm run register-commands`, then press Ctrl+R in Discord.
 - **`/donate` says donations aren't open yet:** `CHARITY_PAGE` is empty or wrong. `npm run check-config` tells you which.
 - **"We couldn't match this donation to our charity":** JustGiving can take a few seconds to list a new donation. The bot retries for about ten seconds; after that, the donor can press **Try again** on the page or **I've already donated** in Discord.
-- **"Your role is on its way" but no role yet:** normal when many people donate at once. Discord limits how fast roles can be added, so the bot works through a queue. `/donor-status` adds the role straight away.
+- **"Your role is on its way" but no role yet:** normal when many people donate at once. Discord limits how fast roles can be added, so the bot works through a queue. `/donor-status` offers to restore the role after a fresh Show/Hide choice.
 - **A member donated without using `/donate`:** the bot can't tell which Discord account made that donation. Give them the role by hand.
 - **The bot answers twice, or oddly:** two copies are running with the same token, for example one on your computer and one on Fly. Stop one of them.
 

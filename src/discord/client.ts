@@ -1,9 +1,9 @@
 import { Client, Events, MessageFlags, type Interaction } from 'discord.js';
 import type { AppContext } from '../context.js';
-import { CLAIM_BUTTON_ID, CLAIM_MODAL_ID, handleClaim, handleClaimButton, handleClaimModal } from './commands/claim.js';
+import { CLAIM_BUTTON_ID, CLAIM_MODAL_ID, CLAIM_SHOW_ID, CLAIM_HIDE_ID, handleClaim, handleClaimButton, handleClaimChoice, handleClaimModal } from './commands/claim.js';
 import { WALL_HIDE_ID, WALL_SHOW_ID, handleDonate, handleWallChoice } from './commands/donate.js';
 import { FORGET_CANCEL_ID, FORGET_CONFIRM_ID, handleDonorForget, handleForgetChoice } from './commands/donor-forget.js';
-import { handleDonorStatus } from './commands/donor-status.js';
+import { handleDonorStatus, handleStatusChoice, STATUS_SHOW_ID, STATUS_HIDE_ID } from './commands/donor-status.js';
 import { handleDonorWall } from './commands/donor-wall.js';
 import { genericErrorEmbed } from './embeds.js';
 
@@ -23,12 +23,16 @@ async function route(interaction: Interaction, ctx: AppContext): Promise<void> {
     if (interaction.commandName === 'donor-wall') return handleDonorWall(interaction, ctx);
     if (interaction.commandName === 'donor-forget') return handleDonorForget(interaction);
   } else if (interaction.isButton() && interaction.customId === CLAIM_BUTTON_ID) {
-    return handleClaimButton(interaction);
+    return handleClaimButton(interaction, ctx);
+  } else if (interaction.isButton() && (interaction.customId === CLAIM_SHOW_ID || interaction.customId === CLAIM_HIDE_ID)) {
+    return handleClaimChoice(interaction, ctx, interaction.customId === CLAIM_HIDE_ID);
+  } else if (interaction.isButton() && (interaction.customId === STATUS_SHOW_ID || interaction.customId === STATUS_HIDE_ID)) {
+    return handleStatusChoice(interaction, ctx, interaction.customId === STATUS_HIDE_ID);
   } else if (interaction.isButton() && (interaction.customId === WALL_SHOW_ID || interaction.customId === WALL_HIDE_ID)) {
     return handleWallChoice(interaction, ctx, interaction.customId === WALL_HIDE_ID);
   } else if (interaction.isButton() && (interaction.customId === FORGET_CONFIRM_ID || interaction.customId === FORGET_CANCEL_ID)) {
     return handleForgetChoice(interaction, ctx, interaction.customId === FORGET_CONFIRM_ID);
-  } else if (interaction.isModalSubmit() && interaction.customId === CLAIM_MODAL_ID) {
+  } else if (interaction.isModalSubmit() && (interaction.customId === CLAIM_MODAL_ID || interaction.customId.startsWith(`${CLAIM_MODAL_ID}:`))) {
     return handleClaimModal(interaction, ctx);
   }
 }

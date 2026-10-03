@@ -1,12 +1,13 @@
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, type ButtonInteraction, type ChatInputCommandInteraction } from 'discord.js';
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags } from 'discord.js';
 import type { AppContext } from '../../context.js';
 import { COLORS } from '../embeds.js';
+import type { ReplyInteraction, UpdateInteraction } from '../interaction-ports.js';
 
 export const FORGET_CONFIRM_ID = 'donor:forget-confirm';
 export const FORGET_CANCEL_ID = 'donor:forget-cancel';
 
 /** Step 1: explain exactly what will be deleted and ask for confirmation. */
-export async function handleDonorForget(interaction: ChatInputCommandInteraction): Promise<void> {
+export async function handleDonorForget(interaction: ReplyInteraction): Promise<void> {
   const embed = new EmbedBuilder()
     .setColor(COLORS.danger)
     .setTitle('Delete my data?')
@@ -33,7 +34,7 @@ export async function handleDonorForget(interaction: ChatInputCommandInteraction
 }
 
 /** Step 2: the member confirmed or cancelled. */
-export async function handleForgetChoice(interaction: ButtonInteraction, ctx: AppContext, confirmed: boolean): Promise<void> {
+export async function handleForgetChoice(interaction: UpdateInteraction, ctx: AppContext, confirmed: boolean): Promise<void> {
   if (!confirmed) {
     await interaction.update({
       embeds: [new EmbedBuilder().setColor(COLORS.neutral).setTitle('Nothing was deleted').setDescription('Your data is unchanged.')],
@@ -41,6 +42,7 @@ export async function handleForgetChoice(interaction: ButtonInteraction, ctx: Ap
     });
     return;
   }
+  ctx.claimPrompts.forget(interaction.user.id);
   const claims = ctx.donations.store.forgetUser(interaction.user.id);
   // Deliberately no user ID here: the point is to keep nothing about them.
   ctx.donations.store.audit('user_forgotten', { detail: `${claims} claim${claims === 1 ? '' : 's'} deleted` });

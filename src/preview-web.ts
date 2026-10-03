@@ -3,6 +3,7 @@
  * data, without logging in to Discord or calling JustGiving. For design work
  * while the live bot is running (two copies of the real bot must never run at once).
  */
+import { ClaimPrompts } from './claim-prompts.js';
 import { DEFAULT_ACCENT_COLOR, DEFAULT_REWARD_TEXT, settingsFromEnvironment, type Config } from './config.js';
 import type { AppContext } from './context.js';
 import { openStore } from './db.js';
@@ -78,6 +79,7 @@ const pages = new PageDirectory(justGiving, charity);
 const discord: DiscordActions = { addRole: async () => 'added', removeRole: async () => true, sendThanks: async () => undefined };
 
 const ctx: AppContext = {
+  claimPrompts: new ClaimPrompts(),
   config,
   pages,
   donations: { justGiving, store, charity, pages, receipts: new ReceiptDirectory(justGiving, charity), discord, sendDmOnSuccess: false },

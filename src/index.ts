@@ -1,4 +1,5 @@
 import { Events } from 'discord.js';
+import { ClaimPrompts } from './claim-prompts.js';
 import { loadConfigOrExit } from './config.js';
 import type { AppContext } from './context.js';
 import { openStore } from './db.js';
@@ -19,6 +20,7 @@ const receipts = new ReceiptDirectory(justGiving, config.charity);
 const client = createDiscordClient();
 
 const ctx: AppContext = {
+  claimPrompts: new ClaimPrompts(),
   config,
   pages,
   profiles: new ProfileDirectory(client.rest),
