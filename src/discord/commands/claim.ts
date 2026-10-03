@@ -1,7 +1,6 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, LabelBuilder, MessageFlags, ModalBuilder, TextInputBuilder, TextInputStyle } from 'discord.js';
 import type { AppContext } from '../../context.js';
-import { processDonation, resolveClaimInput } from '../../donations.js';
-import { JustGivingError } from '../../justgiving.js';
+import { processClaim } from '../../donations.js';
 import { failureEmbed, successEmbed, wallChoiceEmbed } from '../embeds.js';
 import type { ClaimModalInteraction, ModalButtonInteraction, ReplyInteraction } from '../interaction-ports.js';
 
@@ -58,21 +57,17 @@ export async function handleClaimModal(interaction: ClaimModalInteraction, ctx: 
     await interaction.reply({ content: 'This claim form has expired. Run /claim and choose Show or Hide again.', flags: MessageFlags.Ephemeral });
     return;
   }
-  // Provider I/O starts only after acknowledging the modal submission.
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  let donationId: string | null;
+  const operation = ctx.donations.operations.begin(interaction.user.id);
   try {
-    donationId = await resolveClaimInput(interaction.fields.getTextInputValue(DONATION_INPUT_ID).trim(), ctx.donations);
-  } catch (error) {
-    if (!(error instanceof JustGivingError)) throw error;
-    await interaction.editReply({ embeds: [failureEmbed('api_error')] });
-    return;
+    // Track the acknowledgement too: forgetting while it is in flight invalidates this attempt.
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const outcome = operation.isCurrent()
+      ? await processClaim(interaction.fields.getTextInputValue(DONATION_INPUT_ID).trim(), interaction.user.id, ctx.donations, { operation })
+      : { ok: false, reason: 'claim_cancelled' } as const;
+    await interaction.editReply({
+      embeds: [outcome.ok ? successEmbed(ctx.config.charity, outcome.role, outcome.donationId) : failureEmbed(outcome.reason)],
+    });
+  } finally {
+    operation.finish();
   }
-  if (donationId === null) {
-    ctx.donations.store.audit('verification_failed', { discordUserId: interaction.user.id, detail: 'claim: receipt reference not on our page' });
-    await interaction.editReply({ embeds: [failureEmbed('donation_not_found')] });
-    return;
-  }
-  const outcome = await processDonation({ source: 'claim', donationId, discordUserId: interaction.user.id }, ctx.donations);
-  await interaction.editReply({ embeds: [outcome.ok ? successEmbed(ctx.config.charity, outcome.role, donationId) : failureEmbed(outcome.reason)] });
 }

@@ -40,20 +40,35 @@ export async function handleDonorStatus(interaction: DeferredInteraction & { rea
 
 /** Re-read eligible claims at the click, not from an earlier status response. */
 export async function handleStatusChoice(interaction: DeferredInteraction, ctx: AppContext, hidden: boolean): Promise<void> {
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const { charity, site } = ctx.config;
-  const { store, discord } = ctx.donations;
-  const claims = store.getClaimsForUser(interaction.user.id).filter((c) => c.status === 'granted');
-  if (claims.length === 0) {
-    await interaction.editReply({ embeds: [statusEmbed(site, charity, null)] });
-    return;
+  const operation = ctx.donations.operations.begin(interaction.user.id);
+  try {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    if (!operation.isCurrent()) {
+      await interaction.editReply({ content: 'Your data was unlinked. Run /donor-status again.' });
+      return;
+    }
+    const { charity, site } = ctx.config;
+    const { store, discord } = ctx.donations;
+    const claims = store.getClaimsForUser(interaction.user.id).filter((c) => c.status === 'granted');
+    if (claims.length === 0) {
+      await interaction.editReply({ embeds: [statusEmbed(site, charity, null)] });
+      return;
+    }
+    store.setHiddenFromWall(interaction.user.id, hidden);
+    store.audit(hidden ? 'wall_hidden' : 'wall_shown', { discordUserId: interaction.user.id, detail: 'donor-status' });
+    const result = await discord.addRole(interaction.user.id, charity.roleId, `Re-applied by /donor-status for ${charity.name}`);
+    if (!operation.isCurrent()) {
+      await interaction.editReply({ content: 'Your data was unlinked. A role request already sent to Discord cannot be recalled.' });
+      return;
+    }
+    if (result === 'added') {
+      for (const claim of claims) {
+        if (store.getClaim(claim.donationId)?.status === 'granted') store.setRoleState(claim.donationId, 'added');
+      }
+      store.audit('role_reapplied', { discordUserId: interaction.user.id });
+    }
+    await interaction.editReply({ embeds: [statusEmbed(site, charity, { donations: claims.length, state: result === 'added' ? 'restored' : 'failed' })] });
+  } finally {
+    operation.finish();
   }
-  store.setHiddenFromWall(interaction.user.id, hidden);
-  store.audit(hidden ? 'wall_hidden' : 'wall_shown', { discordUserId: interaction.user.id, detail: 'donor-status' });
-  const result = await discord.addRole(interaction.user.id, charity.roleId, `Re-applied by /donor-status for ${charity.name}`);
-  if (result === 'added') {
-    for (const claim of claims) store.setRoleState(claim.donationId, 'added');
-    store.audit('role_reapplied', { discordUserId: interaction.user.id });
-  }
-  await interaction.editReply({ embeds: [statusEmbed(site, charity, { donations: claims.length, state: result === 'added' ? 'restored' : 'failed' })] });
 }

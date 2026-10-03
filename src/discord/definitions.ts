@@ -21,7 +21,7 @@ export const commandDefinitions = [
     ),
   new SlashCommandBuilder()
     .setName('donor-forget')
-    .setDescription('Delete everything this bot stores about you')
+    .setDescription('Delete your Discord donation links; used donation IDs remain to prevent reuse')
     .setContexts(InteractionContextType.Guild),
   new SlashCommandBuilder()
     .setName('donor-status')

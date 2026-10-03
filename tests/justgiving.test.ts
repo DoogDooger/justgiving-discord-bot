@@ -38,6 +38,19 @@ function fakeFetch(routes: Record<string, { status?: number; body?: unknown }>) 
 }
 
 describe('JustGiving client', () => {
+  it('lists historical donation IDs beyond the first 100 using the documented cursor', async () => {
+    const first = Array.from({ length: 100 }, (_, i) => ({ id: i + 1 }));
+    const { fn, seen } = fakeFetch({
+      '/fundraising/pages/page/example/donations?pageSize=100': { body: { donations: first, pagination: { nextPageCursor: 'next/100' } } },
+      '/fundraising/pages/page/example/donations?pageSize=100&pageCursor=next%2F100': { body: { donations: [{ id: 101 }], pagination: {} } },
+    });
+    const client = createJustGivingClient({ appId: 'APPID', apiBase: 'https://api.test', fetch: fn });
+    const ids = await client.getPageDonationIds('page/example');
+    expect(ids).toHaveLength(101);
+    expect(ids.at(-1)).toBe('101');
+    expect(seen).toHaveLength(2);
+  });
+
   it('reads a donation and normalises the ID to a string', async () => {
     const { fn } = fakeFetch({ '/donation/1234': { body: { id: 1234, status: 'Accepted', thirdPartyReference: ' ABCD2345 ', charityId: 4321, donationRef: '123456789' } } });
     const client = createJustGivingClient({ appId: 'APPID', apiBase: 'https://api.test', fetch: fn });

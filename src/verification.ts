@@ -1,4 +1,6 @@
 import type { CharityConfig } from './config.js';
+import { donationId as canonicalDonationId } from './donation-id.js';
+import { receiptReference } from './receipts.js';
 import type { Store } from './db.js';
 import { JustGivingError, type JustGivingApi } from './justgiving.js';
 import type { PageDirectory } from './pages.js';
@@ -6,8 +8,8 @@ import type { PageDirectory } from './pages.js';
 /**
  * Every acceptance rule for a donation lives here. A donation is accepted only if:
  *  1. JustGiving returns it.
- *  2. Its reference maps to one of our tokens, owned by the right Discord user
- *     (redirect: the token in the return URL; /claim: the user running the command).
+ *  2. Its bot reference belongs to the right user; or an untagged manual claim has
+ *     a matching receipt reference and fresh membership of the exact configured page.
  *  3. Its status is Accepted.
  *  4. It went to the charity of our configured page (charity ID from the donation
  *     record or the reference lookup), or failing that, it is listed on our page.
@@ -18,7 +20,7 @@ import type { PageDirectory } from './pages.js';
 
 export type VerifyRequest =
   | { source: 'redirect'; donationId: string; token: string }
-  | { source: 'claim'; donationId: string; discordUserId: string };
+  | { source: 'claim'; donationId: string; discordUserId: string; receiptRef?: string | null };
 
 export type FailureReason =
   | 'invalid_donation_id'
@@ -34,15 +36,16 @@ export type FailureReason =
   | 'not_accepted'
   | 'after_deadline'
   | 'wrong_page'
-  | 'api_error';
+  | 'api_error'
+  | 'claim_cancelled';
 
 export type VerifyResult =
-  | { ok: true; discordUserId: string; token: string; pageShortName: string }
+  | { ok: true; donationId: string; discordUserId: string; token: string | null; pageShortName: string }
   | { ok: false; reason: FailureReason; discordUserId?: string; detail?: string };
 
 export interface VerifyDeps {
   justGiving: JustGivingApi;
-  store: Pick<Store, 'getTokenOwner' | 'getClaim'>;
+  store: Pick<Store, 'getTokenOwner' | 'getClaim' | 'hasRedeemedDonation'>;
   charity: CharityConfig;
   driveEndsAt?: Date | null;
   pages: Pick<PageDirectory, 'getPageOrThrow'>;
@@ -54,11 +57,11 @@ export interface VerifyDeps {
   retryDelayMs?: number;
 }
 
-const DONATION_ID = /^\d{1,15}$/;
 const TOKEN = /^[A-Za-z0-9]{1,8}$/;
 
+/** Verify provider identity, ownership/receipt eligibility, status, date and durable anti-reuse. */
 export async function verifyDonation(request: VerifyRequest, deps: VerifyDeps): Promise<VerifyResult> {
-  const { donationId } = request;
+  const donationId = canonicalDonationId(request.donationId);
   const knownUser = request.source === 'claim' ? request.discordUserId : undefined;
   const fail = (reason: FailureReason, extra: { discordUserId?: string; detail?: string } = {}): VerifyResult => ({
     ok: false,
@@ -67,7 +70,7 @@ export async function verifyDonation(request: VerifyRequest, deps: VerifyDeps): 
     detail: extra.detail,
   });
 
-  if (!DONATION_ID.test(donationId)) return fail('invalid_donation_id');
+  if (donationId === null) return fail('invalid_donation_id');
   if (request.source === 'redirect' && !TOKEN.test(request.token)) return fail('invalid_token');
 
   const pagePath = deps.charity.pageShortName;
@@ -84,15 +87,22 @@ export async function verifyDonation(request: VerifyRequest, deps: VerifyDeps): 
     });
   }
 
+  if (deps.store.hasRedeemedDonation(donationId)) return fail('already_claimed');
+
   try {
     const donation = await deps.justGiving.getDonation(donationId);
     if (!donation) return fail('donation_not_found');
+    if (canonicalDonationId(donation.id) !== donationId) return fail('api_error', { detail: 'donation ID mismatch' });
 
     const reference = donation.thirdPartyReference;
-    if (!reference) return fail('missing_reference');
-
     let discordUserId: string;
-    if (request.source === 'redirect') {
+    if (!reference) {
+      if (request.source !== 'claim' || !request.receiptRef) return fail('missing_reference');
+      if (!donation.receiptRef || receiptReference(donation.receiptRef) !== request.receiptRef) {
+        return fail('donation_not_found');
+      }
+      discordUserId = request.discordUserId;
+    } else if (request.source === 'redirect') {
       if (reference.toUpperCase() !== request.token.toUpperCase()) return fail('reference_mismatch');
       const owner = deps.store.getTokenOwner(request.token.toUpperCase());
       if (!owner) return fail('reference_mismatch');
@@ -114,10 +124,19 @@ export async function verifyDonation(request: VerifyRequest, deps: VerifyDeps): 
 
     const accept = (): VerifyResult => ({
       ok: true,
+      donationId,
       discordUserId,
-      token: reference.toUpperCase(),
+      token: reference ? reference.toUpperCase() : null,
       pageShortName: pagePath,
     });
+
+    if (!reference) {
+      // The recent-100 shortcut is insufficient for historical receipts. A cached
+      // receipt match is not enough: confirm current exact-page membership.
+      const ids = await deps.justGiving.getPageDonationIds(pagePath);
+      if (!ids.some((id) => canonicalDonationId(id) === donationId)) return fail('wrong_page', { discordUserId });
+      return accept();
+    }
 
     // Primary: the donation's charity ID must match the charity our page raises money for.
     // It's on the donation record itself; the reference lookup is a second source.

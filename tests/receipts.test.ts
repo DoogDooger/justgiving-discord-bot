@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { processDonation, resolveClaimInput } from '../src/donations.js';
+import { processClaim, processDonation, resolveClaimInput } from '../src/donations.js';
 import { JustGivingError, type Donation } from '../src/justgiving.js';
 import { ReceiptDirectory } from '../src/receipts.js';
 import { USER_A, charity, donation, setup } from './helpers.js';
@@ -97,42 +97,41 @@ describe('claiming with what the receipt shows', () => {
 
   it.each(['123456789/1', '123456789', ' 123456789 / 1 '])('turns %j into the donation ID', async (input) => {
     const { deps } = setup((t) => page(t.a));
-    expect(await resolveClaimInput(input, deps)).toBe('9000000001');
+    expect(await resolveClaimInput(input, deps)).toEqual({ donationId: '9000000001', receiptRef: '123456789' });
   });
 
   it('still accepts the donation ID itself', async () => {
     const { deps } = setup((t) => page(t.a));
-    expect(await resolveClaimInput('9000000001', deps)).toBe('9000000001');
+    expect(await resolveClaimInput('9000000001', deps)).toEqual({ donationId: '9000000001', receiptRef: null });
   });
 
   it('knows a receipt for a different page is not ours, and leaves a bare unknown number to verification', async () => {
     const { deps } = setup((t) => page(t.a));
     expect(await resolveClaimInput('987654321/1', deps)).toBeNull();
-    expect(await resolveClaimInput('987654321', deps)).toBe('987654321');
+    expect(await resolveClaimInput('987654321', deps)).toEqual({ donationId: '987654321', receiptRef: null });
     expect(await processDonation({ source: 'claim', donationId: '987654321', discordUserId: USER_A }, deps)).toEqual({ ok: false, reason: 'donation_not_found' });
   });
 
   it('passes anything that is not a number through, to be refused as invalid', async () => {
     const { deps } = setup((t) => page(t.a));
-    expect(await resolveClaimInput('my receipt', deps)).toBe('my receipt');
+    expect(await resolveClaimInput('my receipt', deps)).toEqual({ donationId: 'my receipt', receiptRef: null });
     expect(await processDonation({ source: 'claim', donationId: 'my receipt', discordUserId: USER_A }, deps)).toEqual({ ok: false, reason: 'invalid_donation_id' });
   });
 
   it('gives the role from the receipt reference, once', async () => {
     const { deps, discord, store, tokens } = setup((t) => page(t.a));
-    const donationId = (await resolveClaimInput('123456789/1', deps))!;
-    expect(await processDonation({ source: 'claim', donationId, discordUserId: USER_A }, deps)).toMatchObject({ ok: true, role: 'added' });
+    expect(await processClaim('123456789/1', USER_A, deps)).toMatchObject({ ok: true, role: 'added', donationId: '9000000001' });
     expect(discord.calls).toEqual([{ userId: USER_A, roleId: charity.roleId }]);
     expect(store.getClaim('9000000001')).toMatchObject({ discordUserId: USER_A, token: tokens.a });
 
-    const again = (await resolveClaimInput('123456789/1', deps))!;
-    expect(await processDonation({ source: 'claim', donationId: again, discordUserId: USER_A }, deps)).toEqual({ ok: false, reason: 'already_claimed_by_you' });
+    expect(await processClaim('123456789/1', USER_A, deps)).toEqual({ ok: false, reason: 'already_claimed_by_you' });
   });
 
-  it('finding a donation does not change the rules: one made without /donate is still refused', async () => {
-    const { deps } = setup(() => page(null));
-    const donationId = (await resolveClaimInput('123456789/1', deps))!;
-    expect(await processDonation({ source: 'claim', donationId, discordUserId: USER_A }, deps)).toEqual({ ok: false, reason: 'missing_reference' });
+  it('allows an untagged receipt but does not broaden the old numeric-ID fallback', async () => {
+    const { deps, store } = setup(() => page(null));
+    expect(await processClaim('9000000001', USER_A, deps)).toEqual({ ok: false, reason: 'missing_reference' });
+    expect(await processClaim('123456789/1', USER_A, deps)).toMatchObject({ ok: true, donationId: '9000000001' });
+    expect(store.getClaim('9000000001')?.token).toBeNull();
   });
 
   it('reports JustGiving being down rather than "not found"', async () => {

@@ -5,10 +5,11 @@ import { ClaimPrompts } from '../src/claim-prompts.js';
 import type { AppContext } from '../src/context.js';
 import type { Store } from '../src/db.js';
 import { CLAIM_MODAL_ID, handleClaim, handleClaimButton, handleClaimChoice, handleClaimModal } from '../src/discord/commands/claim.js';
+import { handleWallChoice } from '../src/discord/commands/donate.js';
 import { handleForgetChoice } from '../src/discord/commands/donor-forget.js';
 import { handleDonorStatus, handleStatusChoice } from '../src/discord/commands/donor-status.js';
 import { commandDefinitions } from '../src/discord/definitions.js';
-import { USER_A, USER_B, charity, donation, setup, site } from './helpers.js';
+import { USER_A, USER_B, charity, deferred, donation, setup, site } from './helpers.js';
 
 class Interaction {
   readonly events: { kind: string; payload: unknown }[] = [];
@@ -23,6 +24,7 @@ class Interaction {
   constructor(userId = USER_A) { this.user = { id: userId }; }
   async reply(payload: InteractionReplyOptions) { this.events.push({ kind: 'reply', payload }); }
   async deferReply(payload: InteractionDeferReplyOptions) { this.events.push({ kind: 'defer', payload }); }
+  async deferUpdate() { this.events.push({ kind: 'deferUpdate', payload: null }); }
   async editReply(payload: InteractionEditReplyOptions) { this.events.push({ kind: 'edit', payload }); }
   async update(payload: InteractionUpdateOptions) { this.events.push({ kind: 'update', payload }); }
   async showModal(modal: ModalBuilder) {
@@ -48,7 +50,7 @@ function fixture() {
       publicBaseUrl: 'https://donate.test', port: 0, databasePath: ':memory:',
       sendDmOnSuccess: false, inviteUrl: 'https://discord.gg/example', driveEndsAt: null,
     },
-    donations: f.deps, pages: new PageDirectory(f.deps.justGiving, charity), profiles: { getMany: async () => new Map() },
+    donations: f.deps, pages: new PageDirectory(f.deps.justGiving, charity), profiles: { getMany: async () => new Map(), forget: () => undefined },
   };
   return { ...f, ctx };
 }
@@ -134,6 +136,113 @@ describe('manual claim consent', () => {
     expect(forgotten.text).toContain('expired');
     expect(store.getClaimsForUser(USER_A)).toEqual([]);
     expect(discord.calls).toEqual([]);
+  });
+});
+
+describe('forget during manual work', () => {
+  it('cannot recreate a personal token after forgetting during /donate metadata lookup', async () => {
+    const { ctx, store, tokens } = fixture();
+    const started = deferred<void>();
+    const ready = deferred<Awaited<ReturnType<PageDirectory['getPage']>>>();
+    // A real PageDirectory retains ownership of provider metadata/cache behavior.
+    ctx.pages = new PageDirectory({ ...ctx.donations.justGiving, getPage: async () => {
+      started.resolve(undefined);
+      const page = await ready.promise;
+      if (!page) throw new Error('Missing fixture page');
+      return page;
+    } }, charity);
+    const interaction = new Interaction();
+    const linking = handleWallChoice(interaction, ctx, true);
+    await started.promise;
+    await handleForgetChoice(new Interaction(), ctx, true);
+    ready.resolve({ pageId: '111', charityId: 'C1', charityName: 'Charity One' });
+    await linking;
+    expect(store.getTokenOwner(tokens.a)).toBeNull();
+    expect(interaction.text).toContain('unlinked');
+    expect(interaction.text).not.toContain('link.justgiving.com');
+  });
+
+  it('invalidates a receipt lookup in flight and requires a new consent form', async () => {
+    const { ctx, store, discord, tokens } = fixture();
+    const started = deferred<void>();
+    const result = deferred<string | null>();
+    ctx.donations.receipts = { find: async () => { started.resolve(undefined); return result.promise; } };
+    const interaction = new Interaction();
+    await handleClaimChoice(interaction, ctx, true);
+    const claiming = handleClaimModal(interaction, ctx);
+    await started.promise;
+    await handleForgetChoice(new Interaction(), ctx, true);
+    result.resolve('100');
+    await claiming;
+    expect(store.getClaimsForUser(USER_A)).toEqual([]);
+    expect(store.getTokenOwner(tokens.a)).toBeNull();
+    expect(discord.calls).toEqual([]);
+    expect(interaction.text).toContain('cancelled');
+    expect(store.hasRedeemedDonation('100')).toBe(false);
+    const fresh = new Interaction();
+    await handleClaim(fresh, ctx);
+    expect(fresh.text).toContain('donor:claim-show');
+  });
+
+  it('does not re-create a claim while fresh provider verification is awaiting', async () => {
+    const { ctx, store, discord } = fixture();
+    await ctx.donations.receipts.find('123456789');
+    const started = deferred<void>();
+    const result = deferred<ReturnType<typeof donation> | null>();
+    ctx.donations.justGiving = { ...ctx.donations.justGiving, getDonation: async () => { started.resolve(undefined); return result.promise; } };
+    const interaction = new Interaction();
+    await handleClaimChoice(interaction, ctx, false);
+    const claiming = handleClaimModal(interaction, ctx);
+    await started.promise;
+    await handleForgetChoice(new Interaction(), ctx, true);
+    result.resolve(donation('100', null, 'Accepted', 'C1', null, '123456789'));
+    await claiming;
+    expect(store.getClaim('100')).toBeNull();
+    expect(store.hasRedeemedDonation('100')).toBe(false);
+    expect(discord.calls).toEqual([]);
+  });
+
+  it('keeps a consumed ID after forgetting, and suppresses late thank-you work', async () => {
+    const { ctx, store, discord } = fixture();
+    const started = deferred<void>();
+    const result = deferred<'added'>();
+    ctx.donations.discord = { ...ctx.donations.discord, addRole: async () => { started.resolve(undefined); return result.promise; } };
+    const interaction = new Interaction();
+    await handleClaimChoice(interaction, ctx, false);
+    const claiming = handleClaimModal(interaction, ctx);
+    await started.promise;
+    expect(store.hasRedeemedDonation('100')).toBe(true);
+    const forgotten = new Interaction();
+    await handleForgetChoice(forgotten, ctx, true);
+    result.resolve('added');
+    await claiming;
+    expect(store.getClaim('100')).toBeNull();
+    expect(store.hasRedeemedDonation('100')).toBe(true);
+    expect(discord.dms).toEqual([]);
+    expect(forgotten.text).toContain('used donation IDs');
+    expect(forgotten.text).not.toContain('no longer holds anything');
+    expect(interaction.text).toContain('cancelled');
+  });
+
+  it('does not write a restoration audit after forgetting during a role request', async () => {
+    const { ctx, store, tokens } = fixture();
+    const audits: string[] = [];
+    ctx.donations.store = { ...store, audit: (event, entry) => { audits.push(event); store.audit(event, entry); } };
+    store.insertClaim({ donationId: '100', discordUserId: USER_A, token: tokens.a, pageShortName: 'page-one', source: 'claim' });
+    const started = deferred<void>();
+    const result = deferred<'added'>();
+    ctx.donations.discord = { ...ctx.donations.discord, addRole: async () => { started.resolve(undefined); return result.promise; } };
+    const interaction = new Interaction();
+    const restoring = handleStatusChoice(interaction, ctx, true);
+    await started.promise;
+    await handleForgetChoice(new Interaction(), ctx, true);
+    audits.length = 0;
+    result.resolve('added');
+    await restoring;
+    expect(audits).toEqual([]);
+    expect(store.getClaimsForUser(USER_A)).toEqual([]);
+    expect(store.isHiddenFromWall(USER_A)).toBe(false);
+    expect(interaction.text).toContain('cannot be recalled');
   });
 });
 

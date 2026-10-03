@@ -3,7 +3,15 @@ import { openStore, type Store } from '../src/db.js';
 import type { DiscordActions, DonationDeps, RoleResult } from '../src/donations.js';
 import { JustGivingError, type Donation, type JustGivingApi, type PageInfo } from '../src/justgiving.js';
 import { PageDirectory } from '../src/pages.js';
+import { UserOperations } from '../src/user-operations.js';
 import { ReceiptDirectory } from '../src/receipts.js';
+
+/** Controlled provider/Discord completion through the same injected async seams as production. */
+export function deferred<T>() {
+  let complete: ((value: T) => void) | undefined;
+  const promise = new Promise<T>((resolve) => { complete = resolve; });
+  return { promise, resolve(value: T) { if (!complete) throw new Error('Deferred not initialised'); complete(value); } };
+}
 
 export const USER_A = '111111111111111111';
 export const USER_B = '222222222222222222';
@@ -119,6 +127,7 @@ export function setup(
   const discord = fakeDiscord(roleResult);
   const justGiving = fakeJustGiving(build(tokens));
   const deps: DonationDeps = {
+    operations: new UserOperations(),
     justGiving,
     store,
     charity,

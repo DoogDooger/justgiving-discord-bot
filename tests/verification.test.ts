@@ -205,3 +205,62 @@ describe('verifyDonation: already claimed', () => {
     expect(await verifyDonation({ source: 'claim', donationId: '100', discordUserId: USER_B }, deps)).toMatchObject({ reason: 'already_claimed' });
   });
 });
+
+describe('verifyDonation: direct receipt eligibility', () => {
+  const request = { source: 'claim', donationId: '100', discordUserId: USER_A, receiptRef: '700100' } as const;
+
+  it('requires a matching fresh receipt, exact page and canonical provider ID', async () => {
+    const value = donation('100', null, 'Accepted', 'C1', null, '700100/1');
+    const ids = ['100'];
+    const { deps } = setup(() => ({ donations: { '100': value }, pages: { 'page-one': ids } }));
+    expect(await verifyDonation(request, deps)).toMatchObject({ ok: true, donationId: '100', discordUserId: USER_A, token: null });
+    ids.length = 0; // Even the same charity is insufficient for an untagged donation.
+    expect(await verifyDonation(request, deps)).toMatchObject({ reason: 'wrong_page' });
+    ids.push('100');
+    value.receiptRef = '700200';
+    expect(await verifyDonation(request, deps)).toMatchObject({ reason: 'donation_not_found' });
+    value.receiptRef = '700100';
+    value.id = '200';
+    expect(await verifyDonation(request, deps)).toMatchObject({ reason: 'api_error' });
+  });
+
+  it('never overrides another owner, an unknown reference or a forgotten reference', async () => {
+    const value = donation('100', 'UNKNOWN', 'Accepted', 'C1', null, '700100');
+    const { deps, store, tokens } = setup(() => ({ donations: { '100': value }, pages: { 'page-one': ['100'] } }));
+    expect(await verifyDonation(request, deps)).toMatchObject({ reason: 'reference_mismatch' });
+    value.thirdPartyReference = tokens.b;
+    expect(await verifyDonation(request, deps)).toMatchObject({ reason: 'not_your_reference' });
+    value.thirdPartyReference = tokens.a;
+    expect(await verifyDonation(request, deps)).toMatchObject({ ok: true, token: tokens.a });
+    store.forgetUser(USER_A);
+    expect(await verifyDonation(request, deps)).toMatchObject({ reason: 'reference_mismatch' });
+  });
+
+  it.each(['Pending', 'Refunded', 'Cancelled', 'Rejected'])('rejects receipt status %s', async (status) => {
+    const { deps } = setup(() => ({ donations: { '100': donation('100', null, status, 'C1', null, '700100') }, pages: { 'page-one': ['100'] } }));
+    expect(await verifyDonation(request, deps)).toMatchObject({ reason: status === 'Pending' ? 'pending' : 'not_accepted' });
+  });
+
+  it('uses the actual donation date, not the date an old receipt is claimed', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2028-01-01T00:00:00Z'));
+    try {
+      const cutoff = new Date('2027-01-01T00:00:00Z');
+      const value = donation('100', null, 'Accepted', 'C1', cutoff.getTime() - 1, '700100');
+      const { deps } = setup(() => ({ donations: { '100': value }, pages: { 'page-one': ['100'] } }));
+      deps.driveEndsAt = cutoff;
+      expect(await verifyDonation(request, deps)).toMatchObject({ ok: true });
+      value.donatedAtMs = cutoff.getTime();
+      expect(await verifyDonation(request, deps)).toMatchObject({ reason: 'after_deadline' });
+      value.donatedAtMs = null;
+      expect(await verifyDonation(request, deps)).toMatchObject({ reason: 'api_error' });
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('cannot redeem a donation-only marker left after forgetting', async () => {
+    const { deps, store } = setup();
+    store.insertClaim({ donationId: '100', discordUserId: USER_B, token: null, pageShortName: 'page-one', source: 'claim' });
+    store.forgetUser(USER_B);
+    expect(await verifyDonation(request, deps)).toMatchObject({ reason: 'already_claimed' });
+  });
+});

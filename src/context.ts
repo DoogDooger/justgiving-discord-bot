@@ -10,5 +10,5 @@ export interface AppContext {
   config: Config;
   donations: DonationDeps;
   pages: PageDirectory;
-  profiles: Pick<ProfileDirectory, 'getMany'>;
+  profiles: Pick<ProfileDirectory, 'getMany' | 'forget'>;
 }

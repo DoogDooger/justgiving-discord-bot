@@ -1,8 +1,10 @@
 import type { CharityConfig } from './config.js';
 import type { Store } from './db.js';
-import type { JustGivingApi } from './justgiving.js';
+import { donationId as canonicalDonationId } from './donation-id.js';
+import { JustGivingError, type JustGivingApi } from './justgiving.js';
+import type { UserOperation, UserOperations } from './user-operations.js';
 import type { PageDirectory } from './pages.js';
-import type { ReceiptDirectory } from './receipts.js';
+import { receiptReference, type ReceiptDirectory } from './receipts.js';
 import { verifyDonation, type FailureReason, type VerifyRequest } from './verification.js';
 
 export type RoleResult = 'added' | 'not_member' | 'failed';
@@ -17,6 +19,7 @@ export interface DiscordActions {
 }
 
 export interface DonationDeps {
+  operations: UserOperations;
   justGiving: JustGivingApi;
   store: Store;
   charity: CharityConfig;
@@ -36,7 +39,7 @@ export interface DonationDeps {
 export type RoleOutcome = RoleResult | 'queued';
 
 export type ProcessOutcome =
-  | { ok: true; discordUserId: string; role: RoleOutcome }
+  | { ok: true; donationId: string; discordUserId: string; role: RoleOutcome }
   | { ok: false; reason: FailureReason };
 
 /** How long a donor waits for their role before being told it's on its way. */
@@ -59,6 +62,8 @@ async function grantRole(deps: DonationDeps, claim: { donationId: string; discor
   } finally {
     inFlight.delete(claim.donationId);
   }
+  // Forget cannot recall an already sent REST request, but must not recreate audit/DM work.
+  if (store.getClaim(claim.donationId)?.discordUserId !== claim.discordUserId) return role;
   if (role === 'added') store.setRoleState(claim.donationId, 'added');
   else if (role === 'not_member') store.setRoleState(claim.donationId, 'not_member');
   store.audit(role === 'added' ? 'role_granted' : role === 'not_member' ? 'role_pending_not_member' : 'role_add_failed', {
@@ -73,70 +78,102 @@ async function grantRole(deps: DonationDeps, claim: { donationId: string; discor
   return role;
 }
 
-/** A receipt reference as donors see it ("123456789/1"), or a bare number that could be one or a donation ID. */
-const CLAIM_INPUT = /^(\d{1,15})(\s*\/\s*\d+)?$/;
-
-/**
- * Turns what a member typed into /claim into a donation ID. Donors only ever see the
- * reference on their JustGiving receipt ("123456789/1"), which is not the donation ID,
- * so that is looked up among the donations on our page first. A bare number that isn't
- * a receipt reference there is taken to be a donation ID, as before.
- *
- * Returns null when it is certainly a receipt reference ("…/1") and no donation on our
- * page has it: given to a different page, mistyped, or not listed by JustGiving yet.
- * This only finds the donation; whether it counts is still decided in verification.ts.
- */
-export async function resolveClaimInput(input: string, deps: Pick<DonationDeps, 'receipts'>): Promise<string | null> {
-  const match = CLAIM_INPUT.exec(input.trim());
-  // Not a number at all: pass it on so verification answers "that doesn't look like a receipt reference".
-  if (!match) return input.trim();
-  const [, digits, slash] = match;
-  const found = await deps.receipts.find(digits!);
-  return found ?? (slash ? null : digits!);
+/** Provider-backed receipt resolution; null receiptRef preserves the legacy tagged-ID fallback. */
+export interface ResolvedClaim {
+  readonly donationId: string;
+  readonly receiptRef: string | null;
 }
 
-/** Verifies a donation, records the claim, and gives the charity's role. */
-export async function processDonation(request: VerifyRequest, deps: DonationDeps): Promise<ProcessOutcome> {
+/** Translate a receipt reference to its donation ID without treating the reference as payer authentication. */
+export async function resolveClaimInput(input: string, deps: Pick<DonationDeps, 'receipts'>): Promise<ResolvedClaim | null> {
+  const value = input.trim();
+  const ref = receiptReference(value);
+  if (ref === null) return { donationId: value, receiptRef: null };
+  const found = await deps.receipts.find(ref);
+  if (found) return { donationId: found, receiptRef: ref };
+  return value.includes('/') ? null : { donationId: ref, receiptRef: null };
+}
+
+/** Manual claim boundary: track the whole lookup/verification so forget cannot be undone by a late result. */
+export async function processClaim(
+  input: string,
+  discordUserId: string,
+  deps: DonationDeps,
+  options: { readonly operation?: UserOperation } = {},
+): Promise<ProcessOutcome> {
+  const operation = options.operation ?? deps.operations.begin(discordUserId);
+  try {
+    if (!operation.isCurrent()) return { ok: false, reason: 'claim_cancelled' };
+    const resolved = await resolveClaimInput(input, deps);
+    if (!operation.isCurrent()) return { ok: false, reason: 'claim_cancelled' };
+    if (!resolved) {
+      deps.store.audit('verification_failed', {
+        discordUserId,
+        detail: 'claim: receipt reference not on our page',
+      });
+      return { ok: false, reason: 'donation_not_found' };
+    }
+    return await processDonation({ source: 'claim', discordUserId, ...resolved }, deps, { operation });
+  } catch (error) {
+    if (!(error instanceof JustGivingError)) throw error;
+    return { ok: false, reason: operation.isCurrent() ? 'api_error' : 'claim_cancelled' };
+  } finally {
+    if (!options.operation) operation.finish();
+  }
+}
+
+/** Verify, atomically record use, then give the role. Failed Discord calls keep the durable claim for retry. */
+export async function processDonation(
+  request: VerifyRequest,
+  deps: DonationDeps,
+  options: { readonly operation?: UserOperation } = {},
+): Promise<ProcessOutcome> {
   const { store } = deps;
-  const result = await verifyDonation(request, deps);
+  const knownUser = request.source === 'claim' ? request.discordUserId : store.getTokenOwner(request.token.toUpperCase());
+  const operation = options.operation ?? (knownUser ? deps.operations.begin(knownUser) : null);
+  try {
+    if (operation && !operation.isCurrent()) return { ok: false, reason: 'claim_cancelled' };
+    const result = await verifyDonation(request, deps);
+    if (operation && !operation.isCurrent()) return { ok: false, reason: 'claim_cancelled' };
 
-  if (!result.ok) {
-    store.audit('verification_failed', {
-      discordUserId: result.discordUserId,
-      donationId: request.donationId,
-      detail: [request.source, result.reason, result.detail].filter(Boolean).join(': '),
+    if (!result.ok) {
+      store.audit('verification_failed', {
+        discordUserId: result.discordUserId,
+        donationId: canonicalDonationId(request.donationId),
+        detail: [request.source, result.reason, result.detail].filter((part) => part !== undefined).join(': '),
+      });
+      return { ok: false, reason: result.reason };
+    }
+
+    const { discordUserId, donationId } = result;
+    const inserted = store.insertClaim({
+      donationId,
+      discordUserId,
+      token: result.token,
+      pageShortName: result.pageShortName,
+      source: request.source,
     });
-    return { ok: false, reason: result.reason };
+    if (!inserted) {
+      const winner = store.getClaim(donationId);
+      return { ok: false, reason: winner?.discordUserId === discordUserId ? 'already_claimed_by_you' : 'already_claimed' };
+    }
+
+    // Existing bounded wait/role queue: no network work occurs inside the claim transaction.
+    const granting = grantRole(deps, { donationId, discordUserId }, request.source).catch((error: unknown) => {
+      console.error(`Role grant failed for donation ${donationId}:`, error instanceof Error ? error.message : error);
+      return 'failed' as const;
+    });
+    let timer: NodeJS.Timeout | undefined;
+    const waited = new Promise<'queued'>((resolve) => {
+      timer = setTimeout(() => resolve('queued'), deps.roleWaitMs ?? DEFAULT_ROLE_WAIT_MS);
+    });
+    const role = await Promise.race([granting, waited]);
+    clearTimeout(timer);
+    if (operation && !operation.isCurrent()) return { ok: false, reason: 'claim_cancelled' };
+    return { ok: true, donationId, discordUserId, role };
+  } finally {
+    if (!options.operation) operation?.finish();
   }
-
-  const { discordUserId } = result;
-  const inserted = store.insertClaim({
-    donationId: request.donationId,
-    discordUserId,
-    token: result.token,
-    pageShortName: result.pageShortName,
-    source: request.source,
-  });
-  if (!inserted) {
-    const winner = store.getClaim(request.donationId);
-    return { ok: false, reason: winner?.discordUserId === discordUserId ? 'already_claimed_by_you' : 'already_claimed' };
-  }
-
-  // The claim is safe in the database. Wait briefly for the role; if Discord's queue is
-  // busy, answer now and let the role arrive in the background (syncPendingRoles also
-  // picks it up if this process restarts first).
-  const granting = grantRole(deps, { donationId: request.donationId, discordUserId }, request.source).catch((error: unknown) => {
-    console.error(`Role grant failed for donation ${request.donationId}:`, error instanceof Error ? error.message : error);
-    return 'failed' as const;
-  });
-  let timer: NodeJS.Timeout | undefined;
-  const waited = new Promise<'queued'>((resolve) => {
-    timer = setTimeout(() => resolve('queued'), deps.roleWaitMs ?? DEFAULT_ROLE_WAIT_MS);
-  });
-  const role = await Promise.race([granting, waited]);
-  clearTimeout(timer);
-
-  return { ok: true, discordUserId, role };
 }
 
 /**
@@ -177,6 +214,7 @@ export async function recheckDonations(deps: DonationDeps, options: { minAgeMs: 
     } catch {
       continue;
     }
+    if (store.getClaim(claim.donationId)?.discordUserId !== claim.discordUserId) continue;
     if (status && REVERSED.has(status)) {
       store.revokeClaim(claim.donationId);
       revoked++;
@@ -198,6 +236,7 @@ export async function recheckDonations(deps: DonationDeps, options: { minAgeMs: 
       continue;
     }
     const removed = await deps.discord.removeRole(discordUserId, charity.roleId, 'JustGiving donation refunded, cancelled or rejected');
+    if (store.getClaimsForUser(discordUserId).length === 0) continue;
     if (removed) store.deletePendingRoleRemoval(discordUserId);
     store.audit(removed ? 'role_removed' : 'role_remove_failed', { discordUserId });
   }

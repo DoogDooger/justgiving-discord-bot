@@ -23,6 +23,12 @@ export interface ClaimModalInteraction extends DeferredInteraction {
   readonly fields: { getTextInputValue(id: string): string };
 }
 
+/** A donation-card button acknowledges before fetching provider metadata. */
+export interface DonationButtonInteraction extends ReplyInteraction {
+  deferUpdate(): Promise<unknown>;
+  editReply(options: InteractionEditReplyOptions): Promise<unknown>;
+}
+
 /** Confirmation buttons replace the originating ephemeral message. */
 export interface UpdateInteraction {
   readonly user: { readonly id: string };
